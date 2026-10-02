@@ -525,6 +525,16 @@ sopravviveva alla richiesta di chiusura del sistema e la disinstallazione **non 
 .NET installato. La migrazione a .NET 10 riguarda solo la toolchain di sviluppo e serve prima che
 .NET 8 esca dal supporto (novembre 2026).
 
+**Distribuzione (F8.7):**
+
+| Voce | Valore |
+|---|---|
+| Repository | `renegadeFree/wisper-translator` — **privato** |
+| Release | `v1.0.0` con note, hash SHA-256 e installer allegato |
+| Installer | `WisperTranslator-Setup-1.0.0.exe` — 83,3 MB |
+| SHA-256 | `875389f1176fc7c58738c41de9866caad76a05d8d43a01fd088226af1b0911f3` |
+| File versionati | 93 (nessun binario, nessun modello) |
+
 **Criterio di accettazione (F8.5):** la verifica su una macchina di fascia bassa reale resta da fare:
 qui tutto è stato misurato sulla macchina di sviluppo. `bench` e `hardware` permettono di rifare le
 misure in due comandi.
@@ -707,6 +717,8 @@ tutte le icone usate sono state verificate una per una contro l'enum.
 | 2026-10-03 | F8.3 | `LICENSE`, `THIRD-PARTY-NOTICES.md`, README utente con screenshot | ✅ |
 | 2026-10-03 | F8 | Corretto il blocco della disinstallazione quando l'app restava nella barra delle applicazioni | ✅ |
 | 2026-10-03 | F8 | Verifica reale: installazione, avvio dalla cartella installata, disinstallazione pulita | ✅ |
+| 2026-10-03 | F8.7 | Repository GitHub privato `renegadeFree/wisper-translator` creato e codice pushato (93 file) | ✅ |
+| 2026-10-03 | F8.7 | Release `v1.0.0` pubblicata con installer 83,3 MB e hash SHA-256 nelle note | ✅ |
 
 ---
 

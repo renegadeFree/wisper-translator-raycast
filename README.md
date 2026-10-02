@@ -32,6 +32,10 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 3. Al primo avvio premi **Avvia**: i modelli mancanti vengono scaricati automaticamente in base
    all'hardware rilevato.
 
+> **Avviso di Windows:** l'installer non è firmato digitalmente, quindi SmartScreen può mostrare
+> "Windows ha protetto il PC". Per proseguire: *Ulteriori informazioni* → *Esegui comunque*.
+> Il file è verificabile con l'hash SHA-256 pubblicato nella release.
+
 ## Uso
 
 | Comando | Effetto |
