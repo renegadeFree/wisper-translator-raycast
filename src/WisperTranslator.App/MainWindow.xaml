@@ -1,0 +1,177 @@
+<ui:FluentWindow x:Class="WisperTranslator.App.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Wisper Translator"
+                 Width="570"
+                 Height="360"
+                 MinWidth="360"
+                 MinHeight="200"
+                 WindowBackdropType="Mica"
+                 WindowCornerPreference="Round"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowStartupLocation="Manual"
+                 Topmost="True">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Wisper Translator" ShowMaximize="False" />
+
+        <Menu Grid.Row="1" Margin="6,0,6,2" Background="Transparent">
+            <MenuItem Header="_Sessione">
+                <MenuItem x:Name="MenuStartStop" Header="Avvia" Icon="{ui:SymbolIcon Play24}"
+                          Click="OnStartStopClicked" />
+                <Separator />
+                <MenuItem Header="Sorgenti" Icon="{ui:SymbolIcon Speaker024}">
+                    <MenuItem x:Name="MenuSystem" Header="Audio di sistema" IsCheckable="True"
+                              Click="OnMenuSystemClicked" />
+                    <MenuItem x:Name="MenuMicrophone" Header="Microfono" IsCheckable="True"
+                              Click="OnMenuMicrophoneClicked" />
+                </MenuItem>
+                <MenuItem Header="Direzione" Icon="{ui:SymbolIcon ArrowExport24}">
+                    <MenuItem x:Name="MenuItEn" Header="Italiano → Inglese" IsCheckable="True"
+                              Click="OnMenuItEnClicked" />
+                    <MenuItem x:Name="MenuEnIt" Header="Inglese → Italiano" IsCheckable="True"
+                              Click="OnMenuEnItClicked" />
+                </MenuItem>
+                <Separator />
+                <MenuItem Header="Nascondi nella barra delle applicazioni" Icon="{ui:SymbolIcon Pin24}"
+                          Click="OnHideToTrayClicked" />
+                <MenuItem Header="Esci" Icon="{ui:SymbolIcon Dismiss24}" Click="OnExitClicked" />
+            </MenuItem>
+
+            <MenuItem Header="_Strumenti">
+                <MenuItem x:Name="MenuOverlay" Header="Sottotitoli a schermo intero" IsCheckable="True"
+                          Icon="{ui:SymbolIcon Subtitles24}" Click="OnOverlayClicked" />
+                <Separator />
+                <MenuItem Header="Storico e sessioni…" Icon="{ui:SymbolIcon History24}"
+                          Click="OnHistoryMenuClicked" />
+                <MenuItem Header="Modelli…" Icon="{ui:SymbolIcon ArrowDownload24}"
+                          Click="OnModelsMenuClicked" />
+                <MenuItem Header="Impostazioni…" Icon="{ui:SymbolIcon Settings24}"
+                          Click="OnSettingsClicked" />
+            </MenuItem>
+
+            <MenuItem Header="_Aiuto">
+                <MenuItem Header="Apri cartella dati" Icon="{ui:SymbolIcon Folder24}"
+                          Click="OnOpenDataFolderClicked" />
+                <MenuItem Header="Informazioni" Icon="{ui:SymbolIcon Document24}"
+                          Click="OnAboutClicked" />
+            </MenuItem>
+        </Menu>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="12,2,12,8">
+            <ToggleButton x:Name="SystemToggle"
+                          Content="Sistema"
+                          Padding="10,5"
+                          Margin="0,0,6,0"
+                          Checked="OnSystemToggled"
+                          Unchecked="OnSystemToggled"
+                          ToolTip="Audio riprodotto dal PC" />
+            <ToggleButton x:Name="MicrophoneToggle"
+                          Content="Microfono"
+                          Padding="10,5"
+                          Margin="0,0,6,0"
+                          Checked="OnMicrophoneToggled"
+                          Unchecked="OnMicrophoneToggled"
+                          ToolTip="Ingresso del microfono" />
+            <ComboBox x:Name="DirectionBox"
+                      Width="112"
+                      Margin="0,0,6,0"
+                      SelectionChanged="OnDirectionChanged"
+                      ToolTip="Direzione della traduzione" />
+            <ui:Button x:Name="StartButton"
+                       Content="Avvia"
+                       Icon="{ui:SymbolIcon Play24}"
+                       Appearance="Primary"
+                       Padding="12,5"
+                       Click="OnStartStopClicked" />
+            <Button x:Name="OverlayButton"
+                    Content="Overlay"
+                    Padding="10,5"
+                    Margin="6,0,0,0"
+                    Click="OnOverlayClicked"
+                    ToolTip="Finestra overlay a schermo intero" />
+            <Button x:Name="SettingsButton"
+                    Content="Impostazioni"
+                    Padding="10,5"
+                    Margin="6,0,0,0"
+                    Click="OnSettingsClicked"
+                    ToolTip="Impostazioni, modelli, sessioni e IA" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Padding="12,0,12,0">
+            <ItemsControl x:Name="CueList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border x:Name="CueRoot" Opacity="0" Margin="0,0,0,10" RenderTransformOrigin="0.5,0"
+                                ToolTip="Doppio clic per copiare">
+                            <Border.RenderTransform>
+                                <TranslateTransform Y="-10" />
+                            </Border.RenderTransform>
+                            <Border.Triggers>
+                                <EventTrigger RoutedEvent="Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CueRoot"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="1"
+                                                             Duration="0:0:0.20" />
+                                            <DoubleAnimation Storyboard.TargetName="CueRoot"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                             To="0"
+                                                             Duration="0:0:0.30">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <CubicEase EasingMode="EaseOut" />
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Border.Triggers>
+                            <Border.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Copia Originale" Click="OnCopyOriginalClicked" />
+                                    <MenuItem Header="Copia Traduzione" Click="OnCopyTranslationClicked" />
+                                </ContextMenu>
+                            </Border.ContextMenu>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource CueOriginalText}"
+                                           FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource Scale}, ConverterParameter=0.8}"
+                                           Text="{Binding Original}" />
+                                <TextBlock Style="{StaticResource CueTranslationText}"
+                                           FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                           Text="{Binding Translation}"
+                                           Visibility="{Binding HasTranslation, Converter={StaticResource BoolToVisibility}}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <Border Grid.Row="4" Padding="12,6" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText"
+                           Text="Pronto"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="LevelText"
+                           Grid.Column="1"
+                           Text=""
+                           Margin="8,0,0,0"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

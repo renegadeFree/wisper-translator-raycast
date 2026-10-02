@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\WisperTranslator.Core\WisperTranslator.Core.csproj" />
+  </ItemGroup>
+
+  <!-- WinForms serve solo per l'icona nell'area di notifica: senza il global using
+       i nomi come Application/Clipboard restano quelli di WPF. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <AssemblyName>WisperTranslator.App</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>Wisper Translator</Product>
+    <Company>Wisper Translator</Company>
+    <Copyright>MIT License</Copyright>
+  </PropertyGroup>
+
+</Project>

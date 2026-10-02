@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{53228217-7333-48F5-990D-7580479A0882}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WisperTranslator.App", "src\WisperTranslator.App\WisperTranslator.App.csproj", "{9A02ABC6-681F-4208-86DD-963CD59E5104}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WisperTranslator.Core", "src\WisperTranslator.Core\WisperTranslator.Core.csproj", "{587F1DF1-D438-4B08-8C98-028CC78BE88F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WisperTranslator.Cli", "src\WisperTranslator.Cli\WisperTranslator.Cli.csproj", "{04CB1B21-EEF3-4622-A9BF-57093BA0C33F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{9608C648-035D-40E8-B81B-DC7F050835C4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WisperTranslator.Tests", "tests\WisperTranslator.Tests\WisperTranslator.Tests.csproj", "{FE48B93A-F00B-4A94-A187-17894A45A710}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9A02ABC6-681F-4208-86DD-963CD59E5104}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9A02ABC6-681F-4208-86DD-963CD59E5104}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9A02ABC6-681F-4208-86DD-963CD59E5104}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9A02ABC6-681F-4208-86DD-963CD59E5104}.Release|Any CPU.Build.0 = Release|Any CPU
+		{587F1DF1-D438-4B08-8C98-028CC78BE88F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{587F1DF1-D438-4B08-8C98-028CC78BE88F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{587F1DF1-D438-4B08-8C98-028CC78BE88F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{587F1DF1-D438-4B08-8C98-028CC78BE88F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{04CB1B21-EEF3-4622-A9BF-57093BA0C33F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{04CB1B21-EEF3-4622-A9BF-57093BA0C33F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{04CB1B21-EEF3-4622-A9BF-57093BA0C33F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{04CB1B21-EEF3-4622-A9BF-57093BA0C33F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE48B93A-F00B-4A94-A187-17894A45A710}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE48B93A-F00B-4A94-A187-17894A45A710}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE48B93A-F00B-4A94-A187-17894A45A710}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE48B93A-F00B-4A94-A187-17894A45A710}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9A02ABC6-681F-4208-86DD-963CD59E5104} = {53228217-7333-48F5-990D-7580479A0882}
+		{587F1DF1-D438-4B08-8C98-028CC78BE88F} = {53228217-7333-48F5-990D-7580479A0882}
+		{04CB1B21-EEF3-4622-A9BF-57093BA0C33F} = {53228217-7333-48F5-990D-7580479A0882}
+		{FE48B93A-F00B-4A94-A187-17894A45A710} = {9608C648-035D-40E8-B81B-DC7F050835C4}
+	EndGlobalSection
+EndGlobal

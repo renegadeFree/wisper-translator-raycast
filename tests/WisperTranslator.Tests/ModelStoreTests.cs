@@ -1,0 +1,97 @@
+using System.Security.Cryptography;
+using WisperTranslator.Core.Models;
+
+namespace WisperTranslator.Tests;
+
+/// <summary>
+/// Guardia sul percorso di importazione: un file sbagliato non deve poter sostituire un
+/// modello funzionante (era un difetto reale trovato durante i test di F6).
+/// </summary>
+public class ModelStoreTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "wisper-models-" + Guid.NewGuid().ToString("N"));
+
+    public ModelStoreTests() => Directory.CreateDirectory(_directory);
+
+    [Fact]
+    public async Task AccettaUnFileCorrispondenteAlCatalogo()
+    {
+        var content = new byte[4096];
+        Random.Shared.NextBytes(content);
+        var path = Write(content);
+
+        var (ok, message) = await ModelStore.CheckFileAsync(path, EntryFor(content));
+
+        Assert.True(ok, message);
+        Assert.Equal("Integro", message);
+    }
+
+    [Fact]
+    public async Task RifiutaUnFileConContenutoDiverso()
+    {
+        var expected = new byte[4096];
+        Random.Shared.NextBytes(expected);
+        var path = Write(new byte[4096]);
+
+        var (ok, message) = await ModelStore.CheckFileAsync(path, EntryFor(expected));
+
+        Assert.False(ok);
+        Assert.Contains("Hash diverso", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RifiutaUnFileTroppoPiccolo()
+    {
+        var path = Write([1, 2, 3]);
+
+        var (ok, message) = await ModelStore.CheckFileAsync(path, EntryFor([1, 2, 3]));
+
+        Assert.False(ok);
+        Assert.Contains("troppo piccolo", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RifiutaUnFileDiDimensioneDiversa()
+    {
+        var expected = new byte[8192];
+        Random.Shared.NextBytes(expected);
+        var path = Write(new byte[4096]);
+
+        var (ok, message) = await ModelStore.CheckFileAsync(path, EntryFor(expected));
+
+        Assert.False(ok);
+        Assert.Contains("Dimensione diversa", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string Write(byte[] content)
+    {
+        var path = Path.Combine(_directory, Guid.NewGuid().ToString("N") + ".bin");
+        File.WriteAllBytes(path, content);
+        return path;
+    }
+
+    private static ModelCatalogEntry EntryFor(byte[] content) => new(
+        "test-model",
+        "Modello di prova",
+        ModelRole.Asr,
+        "C",
+        "https://example.invalid/model.bin",
+        "model.bin",
+        "model.bin",
+        content.Length,
+        Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant(),
+        "MIT",
+        "modello fittizio per i test");
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+        catch (Exception)
+        {
+            // cartella temporanea già rimossa
+        }
+    }
+}

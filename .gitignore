@@ -1,0 +1,24 @@
+# build
+bin/
+obj/
+*.user
+
+# eseguibili e pacchetti locali
+publish/
+*.exe
+*.msi
+
+# modelli (grandi, scaricati a runtime)
+models/
+*.bin
+*.onnx
+*.gguf
+
+# audio di test e dump
+audio-dump/
+*.wav
+
+# IDE
+.vs/
+.vscode/
+.idea/

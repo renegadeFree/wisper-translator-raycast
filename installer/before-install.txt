@@ -1,0 +1,16 @@
+Wisper Translator — cosa fa e cosa scarica
+
+• Trascrive e traduce in tempo reale l'audio del PC e/o del microfono (italiano ↔ inglese).
+• Funziona in locale: con i motori predefiniti audio e testo non escono dal computer.
+• Resta attivo nell'area di notifica e può avviarsi con Windows.
+
+Al primo avvio l'applicazione scarica i modelli di cui ha bisogno (circa 250 MB):
+  · modello di trascrizione Whisper (in base all'hardware rilevato)
+  · modello di rilevamento voce Silero
+  · modelli di traduzione IT↔EN (~70 MB)
+
+I riassunti, i punti chiave e le mappe concettuali usano il servizio IA che scegli tu
+(Ollama in locale, oppure un provider cloud con la tua chiave API): l'applicazione non invia
+nulla a servizi esterni se non quando attivi esplicitamente un provider cloud.
+
+I tuoi dati restano in %LOCALAPPDATA%\WisperTranslator (modelli, storico, esportazioni).
