@@ -16,10 +16,14 @@ public sealed class EndpointOptions
     public double MinSpeechSeconds { get; init; } = 0.25;
 
     /// <summary>Silenzio necessario per chiudere l'enunciato (endpoint).</summary>
-    public double MinSilenceSeconds { get; init; } = 0.6;
+    public double MinSilenceSeconds { get; init; } = 0.5;
 
-    /// <summary>Durata massima di un enunciato: oltre, viene chiuso d'ufficio.</summary>
-    public double MaxUtteranceSeconds { get; init; } = 15.0;
+    /// <summary>
+    /// Durata massima di un enunciato: oltre, viene chiuso d'ufficio. Su parlato continuo
+    /// (video, lezioni) un tetto alto fa ridecodificare ogni volta molti secondi di audio e
+    /// manda il decoder in loop di ripetizione: 8 s è il compromesso misurato.
+    /// </summary>
+    public double MaxUtteranceSeconds { get; init; } = 8.0;
 
     /// <summary>Coda di silenzio conservata per non troncare l'ultima parola.</summary>
     public double PadSeconds { get; init; } = 0.1;

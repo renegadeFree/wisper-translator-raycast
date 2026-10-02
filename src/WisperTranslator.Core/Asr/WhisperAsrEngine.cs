@@ -63,7 +63,10 @@ public sealed class WhisperAsrEngine : IAsrEngine
 
         watch.Stop();
         var audioDuration = TimeSpan.FromSeconds(samples.Length / (double)sampleRate);
-        return new AsrResult(text.ToString().Trim(), language, audioDuration, watch.Elapsed, segments);
+        // Su audio lungo il modello può entrare in ciclo: meglio una frase tagliata che una
+        // pagina di ripetizioni (che verrebbe anche tradotta e mostrata).
+        var cleanText = AsrTextGuard.TrimRepetitions(text.ToString());
+        return new AsrResult(cleanText, language, audioDuration, watch.Elapsed, segments);
     }
 
     public void Dispose() => _factory.Dispose();

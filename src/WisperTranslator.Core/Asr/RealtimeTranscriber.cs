@@ -9,6 +9,15 @@ public sealed class RealtimeOptions
     public TimeSpan PartialInterval { get; init; } = TimeSpan.FromMilliseconds(700);
 
     /// <summary>
+    /// Con enunciati lunghi si allunga l'intervallo fra i parziali: la decodifica costa sempre di
+    /// più e accodare lavoro non riduce la latenza, la aumenta soltanto.
+    /// </summary>
+    public TimeSpan MaxPartialInterval { get; init; } = TimeSpan.FromMilliseconds(1600);
+
+    /// <summary>Oltre questa durata di audio il parziale non viene più decodificato in anticipo.</summary>
+    public double PartialDecodeLimitSeconds { get; init; } = 8.0;
+
+    /// <summary>
     /// Audio minimo perché valga la pena decodificare un parziale. Sotto il secondo Whisper
     /// tende a inventare ("buon appetito!" su un frammento): meglio aspettare.
     /// </summary>
@@ -53,6 +62,8 @@ public sealed class RealtimeTranscriber : IDisposable
     private DateTime _pendingPartialQueuedAt;
     private string? _lastPartialText;
     private int _utteranceId;
+    private volatile bool _workerBusy;
+    private TimeSpan _partialInterval;
     private bool _disposed;
 
     public RealtimeTranscriber(
@@ -67,6 +78,7 @@ public sealed class RealtimeTranscriber : IDisposable
         _engine = engine;
         _finalEngine = finalEngine ?? engine;
         _options = options ?? new RealtimeOptions();
+        _partialInterval = _options.PartialInterval;
     }
 
     /// <summary>Testo committato (parziale stabile o frase finale).</summary>
@@ -81,6 +93,9 @@ public sealed class RealtimeTranscriber : IDisposable
     public string? Language { get; set; }
 
     public int FinalSegments { get; private set; }
+
+    /// <summary>Ultimo errore di decodifica: la UI può mostrarlo invece di restare muta.</summary>
+    public string? LastError { get; private set; }
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -130,12 +145,18 @@ public sealed class RealtimeTranscriber : IDisposable
 
                 wasInSpeech = _segmenter.InSpeech;
 
+                // Con il worker occupato un nuovo parziale non farebbe che accodare lavoro vecchio.
                 if (_segmenter.InSpeech
-                    && now - lastPartialAt >= _options.PartialInterval
+                    && !_workerBusy
+                    && now - lastPartialAt >= _partialInterval
                     && _segmenter.TryCopyCurrentUtterance(out var samples)
                     && samples.Length >= minPartialSamples)
                 {
                     lastPartialAt = now;
+                    // Più l'enunciato è lungo, più costa decodificarlo: si dirada invece di accodare.
+                    _partialInterval = TimeSpan.FromMilliseconds(Math.Min(
+                        _options.MaxPartialInterval.TotalMilliseconds,
+                        _options.PartialInterval.TotalMilliseconds * (1.0 + samples.Length / (3.0 * SampleRate))));
                     lock (_gate)
                     {
                         _pendingPartial = samples;
@@ -197,47 +218,72 @@ public sealed class RealtimeTranscriber : IDisposable
 
             if (final is not null)
             {
-                var result = await _finalEngine
-                    .TranscribeAsync(final.Samples, SampleRate, Language, true, cancellationToken)
-                    .ConfigureAwait(false);
+                _workerBusy = true;
+                try
+                {
+                    var result = await _finalEngine
+                        .TranscribeAsync(final.Samples, SampleRate, Language, true, cancellationToken)
+                        .ConfigureAwait(false);
 
-                // La decodifica finale è l'autorità sull'enunciato: sostituisce i parziali,
-                // così le invenzioni su frammenti brevi non restano a schermo.
-                var text = result.Text.Trim();
-                policy.Reset();
-                FinalSegments++;
-                Update?.Invoke(new TranscriptUpdate(
-                    finalUtterance,
-                    text,
-                    true,
-                    final.Start,
-                    final.Duration,
-                    DateTime.UtcNow - finalClosedAt));
-                SegmentClosed?.Invoke(final);
+                    // La decodifica finale è l'autorità sull'enunciato: sostituisce i parziali,
+                    // così le invenzioni su frammenti brevi non restano a schermo.
+                    var text = result.Text.Trim();
+                    policy.Reset();
+                    FinalSegments++;
+                    Update?.Invoke(new TranscriptUpdate(
+                        finalUtterance,
+                        text,
+                        true,
+                        final.Start,
+                        final.Duration,
+                        DateTime.UtcNow - finalClosedAt));
+                    SegmentClosed?.Invoke(final);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    LastError = exception.Message;
+                }
+                finally
+                {
+                    _workerBusy = false;
+                }
+
                 continue;
             }
 
             if (partial is not null)
             {
-                var result = await _engine
-                    .TranscribeAsync(partial, SampleRate, Language, false, cancellationToken)
-                    .ConfigureAwait(false);
-                var agreement = policy.Commit(result.Text);
-                if (agreement.NewlyCommitted.Length > 0 && agreement.CommittedText != _lastPartialText)
+                _workerBusy = true;
+                try
                 {
-                    _lastPartialText = agreement.CommittedText;
-                    Update?.Invoke(new TranscriptUpdate(
-                        partialUtterance,
-                        agreement.CommittedText,
-                        false,
-                        partialStart,
-                        TimeSpan.FromSeconds(partial.Length / (double)SampleRate),
-                        DateTime.UtcNow - partialQueuedAt));
-                }
+                    var result = await _engine
+                        .TranscribeAsync(partial, SampleRate, Language, false, cancellationToken)
+                        .ConfigureAwait(false);
+                    var agreement = policy.Commit(result.Text);
+                    if (agreement.NewlyCommitted.Length > 0 && agreement.CommittedText != _lastPartialText)
+                    {
+                        _lastPartialText = agreement.CommittedText;
+                        Update?.Invoke(new TranscriptUpdate(
+                            partialUtterance,
+                            agreement.CommittedText,
+                            false,
+                            partialStart,
+                            TimeSpan.FromSeconds(partial.Length / (double)SampleRate),
+                            DateTime.UtcNow - partialQueuedAt));
+                    }
 
-                if (agreement.PendingText.Length > 0)
+                    if (agreement.PendingText.Length > 0)
+                    {
+                        Hypothesis?.Invoke(agreement.PendingText);
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    Hypothesis?.Invoke(agreement.PendingText);
+                    LastError = exception.Message;
+                }
+                finally
+                {
+                    _workerBusy = false;
                 }
 
                 continue;

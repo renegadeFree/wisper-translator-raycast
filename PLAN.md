@@ -758,8 +758,52 @@ usata la GPU?
 | Entrambe con selezione a runtime | +171 MB | — | il massimo, ma le due build espongono lo stesso `whisper.dll`: servono cartelle separate e selezione del percorso nativo prima di creare la factory, con fallback su CPU |
 | Nessuna (stato attuale 1.0.0) | 0 | — | funziona su tutto, CPU satura mentre si parla |
 
-**Stato:** ⏸ in attesa della decisione dell'utente. Vincolo da rispettare: qualunque opzione deve
-mantenere il **fallback automatico su CPU** per non rompere il PC di fascia bassa senza CUDA.
+**Ottimizzazione del degrado progressivo (2026-10-03) — risolta.** Segnalazione dell'utente: con un
+video YouTube la trascrizione parte bene e poi rallenta sempre di più.
+
+**Causa trovata (riprodotta con una clip di parlato continuo di 88 s):** con pause sotto i 600 ms il
+VAD non chiude l'enunciato, che cresce fino al tetto di 15 s. A ogni parziale (ogni 700 ms) il decoder
+ridecodificava **tutto** l'enunciato, quindi: costo per decodifica in crescita, coda di lavoro che non
+si smaltisce, e — l'effetto peggiore — **loop di ripetizione** di Whisper, che faceva crollare la
+qualità e gonfiava il testo da tradurre.
+
+**Correzioni applicate:**
+
+| # | Modifica | Perché |
+|---|---|---|
+| 1 | `MaxUtteranceSeconds` 15 → **8 s**, `MinSilenceSeconds` 0,6 → **0,5 s** | enunciati più corti: ogni decodifica costa poco e le frasi finali arrivano più spesso |
+| 2 | `AsrTextGuard.TrimRepetitions` sul testo del decoder | taglia un ciclo di ripetizione alla prima occorrenza (5 test unitari) |
+| 3 | Intervallo dei parziali adattivo (700 ms → fino a 1600 ms con enunciati lunghi) | non si accoda lavoro che non riduce la latenza |
+| 4 | Parziale annullato se il decoder è occupato (`_workerBusy`) | la coda non cresce più |
+| 5 | Errori di decodifica catturati e resi visibili (`LastError`) invece di fermare il worker | il flusso non si blocca più in silenzio |
+
+**Misure prima/dopo** (stessa clip continua di 88,5 s, `base` per i parziali + `small` per le finali):
+
+| Metrica | Prima | Dopo |
+|---|---|---|
+| Accuratezza del testo committato | **77,2 %** | **96,2 %** |
+| Parziali committati (carico CPU) | 70 | **34** |
+| Latenza parziale (mediana / peggiore) | 0,52 s / 1,03 s | 0,50 s / **0,52 s** |
+| Latenza finale (mediana / peggiore) | 1,84 s / 2,49 s | **1,65 s / 2,06 s** |
+| Testo con cicli di ripetizione | sì (frase ripetuta 5 volte) | no |
+
+**Accelerazione GPU (in corso):** il caricatore di Whisper.net prova già da solo
+Cuda → Vulkan → Cpu, quindi le "opzioni in base al PC" esistono: serve fornirgli la build nativa
+giusta. Ricognizione fatta:
+
+| Fatto verificato | Valore |
+|---|---|
+| Build CPU attualmente spedita | solo `ggml-cpu-whisper.dll`, nessun file CUDA/Vulkan (0 su 298) |
+| `Whisper.net.Runtime.Vulkan` | 35 MB di pacchetto, `ggml-vulkan-whisper.dll` 55 MB |
+| `Whisper.net.Runtime.Cuda.Windows` | 136 MB di pacchetto, `ggml-cuda-whisper.dll` 147 MB |
+| Ricerca del caricatore | `{LibraryPath}\runtimes\<rid>\native` come prima cartella, poi la base dell'app |
+| Esito del primo tentativo | impostare `LibraryPath` alla cartella del pacchetto **non basta**: il runtime caricato resta `Cpu` (`RuntimeOptions.LoadedLibrary`) |
+
+**Prossimo passo per la GPU (F11):** leggere `RuntimePathResolver.GetRuntimePath` per rispettare la
+convenzione di cartelle per libreria (o installare la build scelta direttamente in
+`runtimes\win-x64\native` dell'app). Finché la build non è *verificata* il selettore resta su CPU:
+il file `verified.txt` nella cartella del pacchetto è il interruttore. La CPU resta sempre la rete di
+sicurezza per i PC senza GPU. Comandi utili: `-- accel auto`, `-- bench <clip> --model base`.
 
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.

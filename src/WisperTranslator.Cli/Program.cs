@@ -49,6 +49,7 @@ internal static class Program
                 "play" => Play(args[1..]),
                 "models" => await ModelsAsync(args[1..]),
                 "hardware" => Hardware(),
+                "accel" => Acceleration(args[1..]),
                 "history" => History(args[1..]),
                 "ai" => await AiAsync(args[1..]),
                 "help" or "--help" or "-h" => Help(),
@@ -118,6 +119,7 @@ internal static class Program
               models <list|download|verify|delete|import|pairs> [id] [file]
                                            gestione dei modelli (catalogo, hash, spazio)
               hardware                     rileva CPU, GPU, RAM, AVX2 e tier consigliato
+              accel [auto|cpu|gpu]         mostra o imposta l'accelerazione della trascrizione
               history <list|export|purge> [id] [--format srt|txt|json] [--out file]
                                            storico delle sessioni, retention e export
               ai <providers|models|test|summary|points|map|render|report> [opzioni]
@@ -343,6 +345,25 @@ internal static class Program
         Console.WriteLine(profile.Summary);
         var (partial, final) = profile.RecommendedModels;
         Console.WriteLine($"Modelli consigliati: parziali {partial}, finali {final}");
+        return 0;
+    }
+
+    private static int Acceleration(string[] args)
+    {
+        var requested = args.Length > 0 ? args[0].ToLowerInvariant() : "auto";
+        var preference = requested switch
+        {
+            "cpu" => AccelerationPreference.Cpu,
+            "gpu" => AccelerationPreference.Gpu,
+            _ => AccelerationPreference.Auto,
+        };
+
+        var profile = HardwareDetector.Detect();
+        Console.WriteLine($"GPU: {profile.GpuName ?? "non rilevata"} ({profile.VramMegabytes / 1024.0:F1} GB)");
+        Console.WriteLine($"Librerie CUDA  : {WhisperAcceleration.CudaDirectory ?? "assenti"}");
+        Console.WriteLine($"Librerie Vulkan: {WhisperAcceleration.VulkanDirectory ?? "assenti"}");
+        Console.WriteLine($"Scelta ({requested}): {WhisperAcceleration.Apply(preference)}");
+        Console.WriteLine($"Caricata dopo l'uso: {WhisperAcceleration.LoadedLibrary ?? "(non ancora caricata)"}");
         return 0;
     }
 
@@ -597,9 +618,11 @@ internal static class Program
         var samples = WavFile.ReadMono16k(file);
         var audioSeconds = samples.Length / 16000.0;
 
+        var acceleration = WhisperAcceleration.Apply(
+            Has(args, "--cpu") ? AccelerationPreference.Cpu : AccelerationPreference.Auto);
         Console.WriteLine($"Macchina : {Environment.MachineName} ({Environment.ProcessorCount} core logici)");
         Console.WriteLine($"File     : {file} ({audioSeconds:F1} s)");
-        Console.WriteLine($"Modello  : {spec.Id} ({spec.Note})");
+        Console.WriteLine($"Modello  : {spec.Id} ({spec.Note}) · runtime {acceleration}");
 
         using var engine = new WhisperAsrEngine(modelPath, spec.Id);
         var times = new List<double>();
@@ -626,7 +649,8 @@ internal static class Program
         Console.WriteLine($"Mediana  : {median:F2} s   RTF {realTimeFactor:F3}");
         Console.WriteLine($"CPU      : {cpuSeconds:F2} core-secondi in {wallSeconds:F2} s "
                           + $"→ {cpuSeconds / Math.Max(0.01, wallSeconds):F1} core occupati in media "
-                          + $"({cpuSeconds / Math.Max(0.01, audioSeconds):F2} core-secondi per secondo di audio)");
+                          + $"({cpuSeconds / Math.Max(0.01, audioSeconds):F2} core-secondi per secondo di audio)"
+                          + $" · libreria caricata: {WhisperAcceleration.LoadedLibrary ?? "n/d"}");
         Console.WriteLine($"RAM picco: {peakMb} MB");
         Console.WriteLine($"Testo    : {text}");
         if (accuracy is not null)

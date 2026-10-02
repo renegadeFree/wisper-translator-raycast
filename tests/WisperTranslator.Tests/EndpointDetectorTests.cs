@@ -12,8 +12,8 @@ public class EndpointDetectorTests
         var detector = new EndpointDetector(Options);
         var signals = Feed(detector, 0.9, 10);
 
-        // 0,25 s di parlato = 8 frame da 32 ms.
-        Assert.Equal(8, signals.FindIndex(signal => signal == EndpointSignal.SpeechStart) + 1);
+        var expected = (int)Math.Ceiling(Options.MinSpeechSeconds / Options.FrameSeconds);
+        Assert.Equal(expected, signals.FindIndex(signal => signal == EndpointSignal.SpeechStart) + 1);
     }
 
     [Fact]
@@ -35,8 +35,8 @@ public class EndpointDetectorTests
         var signals = Feed(detector, 0.05, 30);
         var index = signals.IndexOf(EndpointSignal.SpeechEnd);
 
-        // 0,6 s di silenzio = 19 frame da 32 ms.
-        Assert.Equal(19, index + 1);
+        var expected = (int)Math.Ceiling(Options.MinSilenceSeconds / Options.FrameSeconds);
+        Assert.Equal(expected, index + 1);
     }
 
     [Fact]
