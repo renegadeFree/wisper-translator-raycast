@@ -724,6 +724,43 @@ tutte le icone usate sono state verificate una per una contro l'enum.
 
 ## 10. Glossario
 
+---
+
+## 11. Accelerazione GPU (F11) — da decidere
+
+**Domanda dell'utente (2026-10-03):** durante la trascrizione la CPU è molto occupata; perché non viene
+usata la GPU?
+
+**Risposta misurata (macchina di sviluppo, RTX 3080 Ti + Ryzen 9 7900X3D):**
+
+| Fase | Costo misurato | Dove va il tempo |
+|---|---|---|
+| Trascrizione Whisper `base` q5_1, 11,3 s di audio | 0,57 s di wall, **20,22 core-secondi** (≈12 thread saturi), 1,78 core-secondi per secondo di audio | **è qui il carico della CPU** |
+| Traduzione Bergamot IT→EN, 20 frasi | **152 ms di CPU per frase**, ~2 core in media, 76 ms di wall | trascurabile |
+
+**Perché la GPU resta ferma:**
+
+1. Il runtime nativo incluso è la build **CPU** di whisper.cpp: nella cartella pubblicata ci sono solo
+   `whisper.dll`, `ggml-whisper.dll`, `ggml-cpu-whisper.dll`. Zero file CUDA/Vulkan (verificato: 0 su
+   298 file installati), quindi non esiste proprio il codice che parla con la scheda video.
+2. La traduzione usa bergamot/intgemm, che è **CPU-only per progetto** (matrici intere ottimizzate per
+   CPU) e non ha variante GPU: non è il collo di bottiglia e non guadagnerebbe nulla.
+3. È una scelta registrata in **D-06 / F2.4**: il target dichiarato erano macchine con GPU integrata
+   senza CUDA, quindi il default è la build CPU. Il tier rilevato dice "A" (c'è una 3080 Ti) ma la
+   raccomandazione dei modelli dipende solo dai core, proprio perché il runtime spedito non usa la GPU.
+
+**Opzioni (misure da fare in F11):**
+
+| Opzione | Costo sull'installer | Requisito | Guadagno atteso |
+|---|---|---|---|
+| `Whisper.net.Runtime.Cuda` | +136 MB di pacchetto | GPU NVIDIA + driver recente (CUDA 12 già presente qui) | stimato 5-15× sul decode, CPU quasi a zero |
+| `Whisper.net.Runtime.Vulkan` | +35 MB | qualsiasi GPU (Intel/AMD/NVIDIA, anche iGPU) | stimato 3-8×, da misurare |
+| Entrambe con selezione a runtime | +171 MB | — | il massimo, ma le due build espongono lo stesso `whisper.dll`: servono cartelle separate e selezione del percorso nativo prima di creare la factory, con fallback su CPU |
+| Nessuna (stato attuale 1.0.0) | 0 | — | funziona su tutto, CPU satura mentre si parla |
+
+**Stato:** ⏸ in attesa della decisione dell'utente. Vincolo da rispettare: qualunque opzione deve
+mantenere il **fallback automatico su CPU** per non rompere il PC di fascia bassa senza CUDA.
+
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.
 - **Enunciato**: porzione di audio compresa tra due silenzi, inviata all'ASR.

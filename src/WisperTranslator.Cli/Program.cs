@@ -604,6 +604,8 @@ internal static class Program
         using var engine = new WhisperAsrEngine(modelPath, spec.Id);
         var times = new List<double>();
         var text = string.Empty;
+        var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;
+        var startBefore = DateTime.UtcNow;
 
         for (var run = 1; run <= runs; run++)
         {
@@ -617,9 +619,14 @@ internal static class Program
         var median = ordered[ordered.Count / 2];
         var realTimeFactor = median / audioSeconds;
         var peakMb = Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024);
+        var cpuSeconds = (Process.GetCurrentProcess().TotalProcessorTime - cpuBefore).TotalSeconds;
+        var wallSeconds = (DateTime.UtcNow - startBefore).TotalSeconds;
         double? accuracy = expected is null ? null : AsrScore.WordAccuracy(expected, text);
 
         Console.WriteLine($"Mediana  : {median:F2} s   RTF {realTimeFactor:F3}");
+        Console.WriteLine($"CPU      : {cpuSeconds:F2} core-secondi in {wallSeconds:F2} s "
+                          + $"→ {cpuSeconds / Math.Max(0.01, wallSeconds):F1} core occupati in media "
+                          + $"({cpuSeconds / Math.Max(0.01, audioSeconds):F2} core-secondi per secondo di audio)");
         Console.WriteLine($"RAM picco: {peakMb} MB");
         Console.WriteLine($"Testo    : {text}");
         if (accuracy is not null)
