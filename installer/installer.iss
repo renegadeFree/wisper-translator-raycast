@@ -2,7 +2,7 @@
 ; Compila con:  iscc installer.iss   (oppure esegui installer/build.ps1)
 
 #define AppName "Wisper Translator"
-#define AppVersion "2.50"
+#define AppVersion "2.51"
 #define AppPublisher "Wisper Translator"
 #define AppExeName "WisperTranslator.App.exe"
 #define SourceDir "..\publish\app"
