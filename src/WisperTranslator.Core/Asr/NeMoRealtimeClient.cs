@@ -123,7 +123,7 @@ public sealed class NeMoRealtimeClient : IAsyncDisposable
     private async Task ReceiveLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         var buffer = new byte[16 * 1024];
-        var message = new MemoryStream();
+        using var message = new MemoryStream();
 
         try
         {
@@ -132,6 +132,7 @@ public sealed class NeMoRealtimeClient : IAsyncDisposable
                 var result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
+                    IsFaulted = true;
                     break;
                 }
 
@@ -141,7 +142,12 @@ public sealed class NeMoRealtimeClient : IAsyncDisposable
                     continue;
                 }
 
-                var json = Encoding.UTF8.GetString(message.ToArray());
+                if (message.Length > 1024 * 1024)
+                {
+                    throw new InvalidOperationException("Messaggio streaming troppo grande.");
+                }
+
+                var json = Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
                 message.SetLength(0);
                 HandleEvent(json);
             }
@@ -217,12 +223,13 @@ public sealed class NeMoRealtimeClient : IAsyncDisposable
 
         if (_socket is { State: WebSocketState.Open })
         {
+            using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
             try
             {
                 await _socket.CloseAsync(
                     WebSocketCloseStatus.NormalClosure,
                     "stop",
-                    CancellationToken.None).ConfigureAwait(false);
+                    closeTimeout.Token).ConfigureAwait(false);
             }
             catch (Exception)
             {

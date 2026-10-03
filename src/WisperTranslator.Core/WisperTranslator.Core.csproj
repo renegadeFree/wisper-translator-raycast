@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -13,9 +13,19 @@
     <PackageReference Include="PdfSharp" Version="6.2.4" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.12" />
     <PackageReference Include="System.Management" Version="10.0.12" />
-    <PackageReference Include="Vosk" Version="0.3.38" />
+    <PackageReference Include="Vosk" Version="0.3.38" GeneratePathProperty="true" ExcludeAssets="build" />
     <PackageReference Include="Whisper.net" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+  </ItemGroup>
+
+  <!-- Vosk 0.3.38 sceglie le librerie dal sistema di build, ignorando il RID.
+       Questo progetto è Windows x64 anche quando viene cross-compilato. -->
+  <ItemGroup>
+    <None Include="$(PkgVosk)/build/lib/win-x64/*.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

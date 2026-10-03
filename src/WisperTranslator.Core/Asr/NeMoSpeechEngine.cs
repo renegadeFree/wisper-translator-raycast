@@ -14,6 +14,7 @@ public sealed class NeMoSpeechEngine : IAsrEngine
     private readonly NeMoSpeechServer _server;
     private readonly bool _ownsServer;
     private readonly bool _diarize;
+    private readonly HttpClient _client = new() { Timeout = TimeSpan.FromMinutes(2) };
 
     public NeMoSpeechEngine(
         NeMoSpeechServer server,
@@ -56,8 +57,7 @@ public sealed class NeMoSpeechEngine : IAsrEngine
             content.Add(new StringContent("verbose_json"), "response_format");
         }
 
-        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-        using var response = await client
+        using var response = await _client
             .PostAsync($"http://127.0.0.1:{_server.Port}/v1/audio/transcriptions", content, cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -151,11 +151,11 @@ public sealed class NeMoSpeechEngine : IAsrEngine
     {
         var dataLength = samples.Length * 2;
         var buffer = new byte[44 + dataLength];
-        var writer = new BinaryWriter(new MemoryStream(buffer), Encoding.ASCII);
-        writer.Write("RIFF"u8.ToArray());
+        using var writer = new BinaryWriter(new MemoryStream(buffer), Encoding.ASCII);
+        writer.Write("RIFF"u8);
         writer.Write(36 + dataLength);
-        writer.Write("WAVE"u8.ToArray());
-        writer.Write("fmt "u8.ToArray());
+        writer.Write("WAVE"u8);
+        writer.Write("fmt "u8);
         writer.Write(16);
         writer.Write((short)1);
         writer.Write((short)1);
@@ -163,7 +163,7 @@ public sealed class NeMoSpeechEngine : IAsrEngine
         writer.Write(sampleRate * 2);
         writer.Write((short)2);
         writer.Write((short)16);
-        writer.Write("data"u8.ToArray());
+        writer.Write("data"u8);
         writer.Write(dataLength);
         for (var i = 0; i < samples.Length; i++)
         {
@@ -176,6 +176,7 @@ public sealed class NeMoSpeechEngine : IAsrEngine
 
     public void Dispose()
     {
+        _client.Dispose();
         if (_ownsServer)
         {
             _server.Dispose();

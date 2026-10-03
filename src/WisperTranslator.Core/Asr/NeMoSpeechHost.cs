@@ -70,7 +70,10 @@ public static class NeMoSpeechHost
     /// <summary>Spegne il server (solo all'uscita dell'applicazione).</summary>
     public static void Shutdown()
     {
-        Gate.Wait(TimeSpan.FromSeconds(5));
+        if (!Gate.Wait(TimeSpan.FromSeconds(5)))
+        {
+            return;
+        }
         try
         {
             _server?.Dispose();

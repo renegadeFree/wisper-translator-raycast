@@ -167,7 +167,7 @@ public sealed class AiAssistant : IDisposable
 
         // Le sessioni lunghe si troncano dal centro per non perdere inizio e fine.
         var half = limit / 2;
-        var builder = new StringBuilder(text.Length);
+        var builder = new StringBuilder(limit + 64);
         builder.Append(text[..half]);
         builder.AppendLine("\n[... parte centrale omessa ...]\n");
         builder.Append(text[^half..]);

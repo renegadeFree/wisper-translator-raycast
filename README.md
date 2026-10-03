@@ -3,6 +3,21 @@
 Trascrizione e traduzione **in tempo reale** e **in locale** dell'audio del PC e del microfono, con
 sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 
+## Review e nuova barra fluttuante — 3 ottobre 2026
+
+Corretti i problemi di audio disattivato, stop dei decoder, persistenza delle traduzioni e retention;
+ridotte copie e allocazioni nei percorsi audio e aggiornamenti UI. Ricostruito il modulo Models
+mancante nella copia del progetto. La barra ora usa un layout compatto in stile Raycast, senza
+cornice standard, con Acrylic nativo e fallback opaco.
+
+[Rapporto completo, misure e limiti del collaudo](docs/CODE_REVIEW.md) ·
+[Anteprima interattiva del nuovo design](docs/bar-preview.html) ·
+[Compilazione Windows e build portabile](docs/BUILD_WINDOWS.md)
+
+La nuova barra è implementata in WPF. L'anteprima HTML serve a ispezionare il design anche su
+questo computer; la resa DWM e la cattura audio richiedono il collaudo Windows.
+Gli screenshot nativi seguenti mostrano **la versione precedente**.
+
 ![Barra fluttuante con i parlanti](docs/screenshots/barra-ascolto.png)
 
 ![Barra a riposo](docs/screenshots/barra-riposo.png)
@@ -134,8 +149,8 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 | `Ctrl+Alt+O` | overlay on/off |
 | `Ctrl+Alt+B` | mostra/nascondi la barra di vetro |
 
-Nella **barra di vetro** il pulsante **corallo a destra** avvia e ferma ed è sempre visibile; al
-passaggio del mouse compaiono i comandi rapidi (sistema, microfono, traduci, conversazione) e il
+Nella **barra di vetro** il pulsante **corallo a destra** avvia e ferma ed è sempre visibile insieme
+ai comandi rapidi (sistema, microfono, traduci, conversazione) e al
 menu `⋯` con direzione, testo mostrato, modalità discreta, overlay, pannello, impostazioni e
 chiusura. Il testo si trascina da qualsiasi punto della barra, che si allarga e si restringe
 **trascinando i bordi laterali**.
@@ -168,16 +183,20 @@ l'eventuale motore cloud opzionale usano la rete, e il motore cloud è spento di
 | Due righe identiche in conversazione | microfono e audio di sistema hanno sentito la stessa voce | usa le cuffie, oppure spegni **Microfono** |
 | Nessun nome accanto alle battute | diarizzatore non installato o motore definitivo non NeMo | `Impostazioni → Conversazione → Scarica il diarizzatore` |
 | La barra non compare | l'hai chiusa con la X (resta attiva) | `Visuale → Barra fluttuante`, oppure dall'icona nella barra delle applicazioni |
-| La barra è troppo stretta o troppo larga | la larghezza predefinita è 1000 px | trascina i bordi laterali oppure usa `Impostazioni → Barra → Larghezza barra` |
+| La barra è troppo stretta o troppo larga | la larghezza predefinita è 760 DIP | trascina i bordi laterali oppure usa `Impostazioni → Barra → Larghezza barra` |
 | Una frase lunga viene tagliata | la riga mostra al massimo due righe | allarga la barra: il testo va a capo finché ci sta |
 | Download interrotto | rete instabile | rilanciare: riprende da dove era rimasto |
 | Modello "hash diverso" | file scaricato male | `Impostazioni → Modelli → Elimina`, poi `Scarica` |
 
 ## Compilare da sorgente
 
+Servono **Windows x64 e l'SDK .NET 8**. La guida [BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md)
+descrive prerequisiti, clone, test, ZIP portabile, installer e risoluzione degli errori.
+La [workflow Windows build](.github/workflows/windows-build.yml) genera automaticamente la build.
+
 ```powershell
-dotnet build                                  # compila
-dotnet test                                   # 86 test
+dotnet build WisperTranslator.sln -c Release
+dotnet test WisperTranslator.sln -c Release     # include i test PDF Windows
 dotnet run --project src/WisperTranslator.Cli -- hardware
 dotnet run --project src/WisperTranslator.Cli -- capture --seconds 15 --dump
 dotnet run --project src/WisperTranslator.Cli -- live --seconds 20 --model base --lang it

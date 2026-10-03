@@ -26,25 +26,25 @@ public class BarGeometryTests
     [Fact]
     public void AltezzaELarghezzaSeguonoLeImpostazioni()
     {
-        Assert.Equal(92, BarGeometry.ViewportHeight(1));
-        Assert.Equal(184, BarGeometry.ViewportHeight(2));
+        Assert.Equal(80, BarGeometry.ViewportHeight(1));
+        Assert.Equal(160, BarGeometry.ViewportHeight(2));
         // Oltre due righe non si va: la barra coprirebbe lo schermo.
-        Assert.Equal(184, BarGeometry.ViewportHeight(9));
-        Assert.Equal(240, BarGeometry.WindowHeight(2));
+        Assert.Equal(160, BarGeometry.ViewportHeight(9));
+        Assert.Equal(248, BarGeometry.WindowHeight(2));
     }
 
     [Fact]
     public void IlDiametroDellaRegioneSegueIlDpi()
     {
-        Assert.Equal(40, BarGeometry.RegionDiameter(BarGeometry.CornerRadiusValue, 1.0));
-        Assert.Equal(50, BarGeometry.RegionDiameter(BarGeometry.CornerRadiusValue, 1.25));
+        Assert.Equal(36, BarGeometry.RegionDiameter(BarGeometry.CornerRadiusValue, 1.0));
+        Assert.Equal(45, BarGeometry.RegionDiameter(BarGeometry.CornerRadiusValue, 1.25));
     }
 
     [Fact]
-    public void LaLarghezzaPredefinitaE1000()
+    public void LaLarghezzaPredefinitaE760()
     {
-        Assert.Equal(1000, new AppSettings().BarWidth);
-        Assert.Equal(1000, BarGeometry.ClampWidth(new AppSettings().BarWidth));
+        Assert.Equal(760, new AppSettings().BarWidth);
+        Assert.Equal(760, BarGeometry.ClampWidth(new AppSettings().BarWidth));
     }
 
     [Fact]

@@ -69,26 +69,32 @@ public static class TemplateStore
         return [.. ReadAll<PdfTemplate>(PdfsDirectory).OrderBy(template => template.Name)];
     }
 
-    public static MapTemplate MapOrDefault(string? id) =>
-        Maps().FirstOrDefault(template => string.Equals(template.Id, id, StringComparison.OrdinalIgnoreCase))
-        ?? Maps().FirstOrDefault()
-        ?? BundledTemplates.Maps[0];
+    public static MapTemplate MapOrDefault(string? id)
+    {
+        var maps = Maps();
+        return maps.FirstOrDefault(template => string.Equals(template.Id, id, StringComparison.OrdinalIgnoreCase))
+            ?? maps.FirstOrDefault() ?? BundledTemplates.Maps[0];
+    }
 
-    public static PdfTemplate PdfOrDefault(string? id) =>
-        Pdfs().FirstOrDefault(template => string.Equals(template.Id, id, StringComparison.OrdinalIgnoreCase))
-        ?? Pdfs().FirstOrDefault()
-        ?? BundledTemplates.Pdfs[0];
+    public static PdfTemplate PdfOrDefault(string? id)
+    {
+        var pdfs = Pdfs();
+        return pdfs.FirstOrDefault(template => string.Equals(template.Id, id, StringComparison.OrdinalIgnoreCase))
+            ?? pdfs.FirstOrDefault() ?? BundledTemplates.Pdfs[0];
+    }
 
     public static void Save(MapTemplate template)
     {
+        var path = TemplatePath(MapsDirectory, template.Id);
         EnsureCreated();
-        File.WriteAllText(Path.Combine(MapsDirectory, $"{template.Id}.json"), JsonSerializer.Serialize(template, Json));
+        File.WriteAllText(path, JsonSerializer.Serialize(template, Json));
     }
 
     public static void Save(PdfTemplate template)
     {
+        var path = TemplatePath(PdfsDirectory, template.Id);
         EnsureCreated();
-        File.WriteAllText(Path.Combine(PdfsDirectory, $"{template.Id}.json"), JsonSerializer.Serialize(template, Json));
+        File.WriteAllText(path, JsonSerializer.Serialize(template, Json));
     }
 
     public static void Delete(MapTemplate template) => DeleteFile(MapsDirectory, template.Id);
@@ -97,11 +103,19 @@ public static class TemplateStore
 
     private static void DeleteFile(string directory, string id)
     {
-        var path = Path.Combine(directory, $"{id}.json");
+        var path = TemplatePath(directory, id);
         if (File.Exists(path))
         {
             File.Delete(path);
         }
+    }
+
+    private static string TemplatePath(string directory, string id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 100
+            || id.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
+            throw new ArgumentException("Id template non valido.", nameof(id));
+        return Path.Combine(directory, $"{id}.json");
     }
 
     /// <summary>Esporta un template in un file JSON scelto dall'utente.</summary>
@@ -126,7 +140,8 @@ public static class TemplateStore
         {
             directory = Path.Combine(Path.GetTempPath(), $"wisper-template-{Guid.NewGuid():N}");
             Directory.CreateDirectory(directory);
-            ZipFile.ExtractToDirectory(path, directory, overwriteFiles: true);
+            try { ZipFile.ExtractToDirectory(path, directory, overwriteFiles: true); }
+            catch { Directory.Delete(directory, recursive: true); throw; }
             temporary = true;
         }
 

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "parameters": "--vulnerable --include-transitive",
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "projects": [
+    {
+      "path": "src/WisperTranslator.App/WisperTranslator.App.csproj"
+    },
+    {
+      "path": "src/WisperTranslator.Core/WisperTranslator.Core.csproj"
+    },
+    {
+      "path": "src/WisperTranslator.Cli/WisperTranslator.Cli.csproj"
+    },
+    {
+      "path": "tests/WisperTranslator.Tests/WisperTranslator.Tests.csproj"
+    }
+  ]
+}

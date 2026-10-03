@@ -28,7 +28,8 @@ public static class NeMoModels
     public static Task<string> EnsureAsync(
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default) =>
-        ModelStore.EnsureAsync(Entry, progress: null, cancellationToken);
+        ModelStore.EnsureAsync(Entry, progress is null ? null : new Progress<long>(
+            bytes => progress.Report(bytes / (double)Entry.ExpectedSizeBytes)), cancellationToken);
 
     /// <summary>
     /// La v1.1 salvava il modello in <c>models\nemo</c>: spostarlo evita di riscaricare 708 MB.

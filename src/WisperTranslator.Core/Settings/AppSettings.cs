@@ -153,6 +153,7 @@ public sealed class AppSettings
                 var loaded = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions);
                 if (loaded is not null)
                 {
+                    loaded.NormalizeValues();
                     loaded.Migrate();
                     return loaded;
                 }
@@ -199,12 +200,38 @@ public sealed class AppSettings
         Save();
     }
 
+    internal void NormalizeValues()
+    {
+        BarWidth = BarGeometry.ClampWidth(BarWidth);
+        BarRows = Math.Clamp(BarRows, 1, BarGeometry.MaxRows);
+        BarBuffer = Math.Clamp(BarBuffer, 3, 8);
+        if (!Enum.IsDefined(BarText)) BarText = BarTextMode.Entrambi;
+        FontSize = double.IsFinite(FontSize) ? Math.Clamp(FontSize, 10, 48) : 16;
+        OverlayFontSize = double.IsFinite(OverlayFontSize) ? Math.Clamp(OverlayFontSize, 12, 96) : 30;
+        Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.2, 1) : 0.95;
+        MaxCues = Math.Clamp(MaxCues, 1, 200);
+        OverlayMaxCues = Math.Clamp(OverlayMaxCues, 1, 20);
+        RetentionDays = Math.Max(0, RetentionDays);
+        PartialModelId = Models.AsrModels.FromId(PartialModelId).Id;
+        FinalModelId = Models.AsrModels.FromId(FinalModelId).Id;
+        SourceLanguage = SourceLanguage == "en" ? "en" : "it";
+        if (WindowLeft is { } left && !double.IsFinite(left)) WindowLeft = null;
+        if (WindowTop is { } top && !double.IsFinite(top)) WindowTop = null;
+        if (BarLeft is { } barLeft && !double.IsFinite(barLeft)) BarLeft = null;
+        if (BarTop is { } barTop && !double.IsFinite(barTop)) BarTop = null;
+        WindowWidth = double.IsFinite(WindowWidth) ? Math.Clamp(WindowWidth, 400, 2000) : 570;
+        WindowHeight = double.IsFinite(WindowHeight) ? Math.Clamp(WindowHeight, 200, 2000) : 320;
+        Ai ??= new AiSettings();
+    }
+
     public void Save()
     {
         try
         {
             AppPaths.EnsureCreated();
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, SerializerOptions));
+            var temporary = FilePath + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(this, SerializerOptions));
+            File.Move(temporary, FilePath, overwrite: true);
         }
         catch (Exception)
         {
@@ -232,6 +259,7 @@ public sealed class AppSettings
             SystemDeviceId = SystemDeviceId,
             MicrophoneDeviceId = MicrophoneDeviceId,
             DiagnosticLog = DiagnosticLog,
+            RetentionDays = RetentionDays,
         };
     }
 }

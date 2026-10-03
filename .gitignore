@@ -2,6 +2,8 @@
 bin/
 obj/
 *.user
+TestResults/
+.DS_Store
 
 # eseguibili e pacchetti locali
 publish/
@@ -9,7 +11,7 @@ publish/
 *.msi
 
 # modelli (grandi, scaricati a runtime)
-models/
+/models/
 *.bin
 *.onnx
 *.gguf

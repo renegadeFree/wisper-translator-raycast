@@ -28,6 +28,7 @@ public class PdfReportTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Windows")]
     public void CostruisceIlReportConLeSezioniDelTemplate()
     {
         var template = BundledTemplates.Pdf("verbale-riunione")!;
@@ -42,6 +43,7 @@ public class PdfReportTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Windows")]
     public void ImportaLaMappaVettorialeComePagina()
     {
         // Il verbale ha una sezione mappa: la pagina vettoriale deve aggiungersi al report.

@@ -38,7 +38,11 @@ public partial class MainWindow : FluentWindow
     private DispatcherTimer? _historyTimer;
     private DispatcherTimer? _levelTimer;
     private readonly DispatcherTimer _barRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(66) };
+    private readonly Dictionary<int, Cue> _pendingCues = [];
+    private readonly object _pendingCueGate = new();
+    private int _cueRefreshScheduled;
     private bool _starting;
+    private bool _stopping;
     private bool _exiting;
     private bool _shotMode;
     private bool _shotRunning;
@@ -64,6 +68,7 @@ public partial class MainWindow : FluentWindow
         _barRefreshTimer.Tick += (_, _) =>
         {
             _barRefreshTimer.Stop();
+            FlushCueUpdates();
             RefreshBarNow();
         };
 
@@ -175,12 +180,7 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>Livello audio più alto fra le sorgenti attive: alimenta la spia e l'equalizzatore.</summary>
-    private float CurrentLevel() =>
-        (_session?.Levels() ?? [])
-        .Where(level => level.Enabled)
-        .Select(level => level.Level)
-        .DefaultIfEmpty(0)
-        .Max();
+    private float CurrentLevel() => _session?.CurrentLevel ?? 0;
 
     private void PurgeHistory()
     {
@@ -307,7 +307,7 @@ public partial class MainWindow : FluentWindow
 
     internal async Task ToggleSessionAsync()
     {
-        if (_starting)
+        if (_starting || _stopping)
         {
             return;
         }
@@ -322,15 +322,20 @@ public partial class MainWindow : FluentWindow
         StartButton.IsEnabled = false;
         StartButton.Content = "Avvio...";
         _cues.Clear();
+        lock (_pendingCueGate) { _pendingCues.Clear(); }
 
         _settings.SystemAudio = SystemToggle.IsChecked == true;
         _settings.Microphone = MicrophoneToggle.IsChecked == true;
         _settings.SourceLanguage = DirectionBox.SelectedIndex == 0 ? "it" : "en";
 
         var session = new TranscriptionSession(_settings.ToSessionOptions());
-        session.CueUpdated += OnCueUpdated;
-        session.StatusChanged += message => Dispatcher.Invoke(() =>
+        session.CueUpdated += cue =>
         {
+            if (ReferenceEquals(_session, session)) OnCueUpdated(cue);
+        };
+        session.StatusChanged += message => Dispatcher.BeginInvoke(() =>
+        {
+            if (!ReferenceEquals(_session, session) || _exiting) return;
             SetStatus(message);
             UpdateTray(message);
         });
@@ -369,15 +374,19 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        _stopping = true;
         var session = _session;
         _session = null;
+        lock (_pendingCueGate) { _pendingCues.Clear(); }
         StartButton.IsEnabled = false;
         SetStatus("Arresto…");
 
         try
         {
             // Le decodifiche in corso vengono abbandonate: la UI non deve mai restare appesa.
-            await Task.WhenAny(session.DisposeAsync().AsTask(), Task.Delay(TimeSpan.FromSeconds(6)));
+            var cleanup = session.DisposeAsync().AsTask();
+            if (await Task.WhenAny(cleanup, Task.Delay(TimeSpan.FromSeconds(6))) == cleanup)
+                await cleanup;
         }
         catch (Exception exception)
         {
@@ -393,40 +402,51 @@ public partial class MainWindow : FluentWindow
             SetStatus("In pausa");
             SyncMenus();
             UpdateTray("In pausa");
+            _stopping = false;
         }
     }
 
     private void OnCueUpdated(Cue cue)
     {
-        Dispatcher.Invoke(() =>
+        if (_exiting) return;
+        lock (_pendingCueGate)
+        {
+            if (_pendingCues.TryGetValue(cue.Id, out var previous) && previous.IsFinal && !cue.IsFinal) return;
+            _pendingCues[cue.Id] = cue;
+        }
+
+        // Il thread audio non aspetta la UI; ogni tick applica soltanto l'ultima versione.
+        if (Interlocked.Exchange(ref _cueRefreshScheduled, 1) == 0)
+            Dispatcher.BeginInvoke(() => _barRefreshTimer.Start(), DispatcherPriority.Background);
+    }
+
+    private void FlushCueUpdates()
+    {
+        Interlocked.Exchange(ref _cueRefreshScheduled, 0);
+        Cue[] updates;
+        lock (_pendingCueGate)
+        {
+            updates = _pendingCues.Values.OrderBy(cue => cue.Id).ToArray();
+            _pendingCues.Clear();
+        }
+
+        foreach (var cue in updates)
         {
             var index = -1;
             for (var i = 0; i < _cues.Count; i++)
             {
-                if (_cues[i].Id == cue.Id)
-                {
-                    index = i;
-                    break;
-                }
+                if (_cues[i].Id == cue.Id) { index = i; break; }
             }
 
             if (index >= 0)
             {
-                _cues[index] = cue;
+                if (!_cues[index].IsFinal || cue.IsFinal) _cues[index] = cue;
             }
-            else
-            {
-                _cues.Insert(0, cue);
-            }
+            else _cues.Insert(0, cue);
+        }
 
-            while (_cues.Count > Math.Max(1, _settings.MaxCues))
-            {
-                _cues.RemoveAt(_cues.Count - 1);
-            }
-
-            _overlay?.Refresh();
-            RefreshBar();
-        });
+        while (_cues.Count > Math.Max(1, _settings.MaxCues)) _cues.RemoveAt(_cues.Count - 1);
+        if (updates.Length > 0 && _overlay is { IsVisible: true }) _overlay.Refresh();
     }
 
     // --- Barra fluttuante ---
@@ -514,7 +534,7 @@ public partial class MainWindow : FluentWindow
     /// <summary>Passa i dati alla barra: frasi e stato dei controlli in un colpo solo.</summary>
     private void RefreshBar()
     {
-        if (_bar is null)
+        if (_bar is not { IsVisible: true })
         {
             return;
         }
@@ -529,7 +549,7 @@ public partial class MainWindow : FluentWindow
 
     private void RefreshBarNow()
     {
-        if (_bar is null)
+        if (_bar is not { IsVisible: true })
         {
             return;
         }
@@ -1013,7 +1033,7 @@ public partial class MainWindow : FluentWindow
         }
 
         _overlay?.Refresh();
-        _bar?.ApplyLayout();
+        if (_bar is not null) { _bar.Topmost = _settings.Topmost; _bar.ApplyLayout(); }
         RefreshBar();
         _settings.Save();
         SyncMenus();
@@ -1052,6 +1072,8 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        _exiting = true;
+
         // In modalità screenshot le preferenze non si toccano: le finestre sono spostate a mano.
         if (!_shotMode)
         {
@@ -1073,6 +1095,7 @@ public partial class MainWindow : FluentWindow
         }
 
         _source?.RemoveHook(WndProc);
+        _barRefreshTimer.Stop();
         _levelTimer?.Stop();
         _historyTimer?.Stop();
 

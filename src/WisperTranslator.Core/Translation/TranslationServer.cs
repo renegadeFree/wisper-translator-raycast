@@ -117,19 +117,15 @@ public sealed class TranslationServer : IDisposable
         var startInfo = new ProcessStartInfo
         {
             FileName = _executablePath,
-            Arguments = string.Join(' ',
-                $"--port {Port}",
-                $"--model-dir \"{_modelDirectory}\"",
-                "--offline",
-                "--no-ui",
-                "--no-check-update",
-                "--log-level warn"),
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        foreach (var argument in new[] { "--port", Port.ToString(), "--model-dir", _modelDirectory,
+            "--offline", "--no-ui", "--no-check-update", "--log-level", "warn" })
+            startInfo.ArgumentList.Add(argument);
 
         var process = Process.Start(startInfo);
         if (process is null)
@@ -176,13 +172,16 @@ public sealed class TranslationServer : IDisposable
         var startInfo = new ProcessStartInfo
         {
             FileName = _executablePath,
-            Arguments = $"--download {string.Join(' ', pairs)} --model-dir \"{_modelDirectory}\" --no-ui --no-check-update",
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        startInfo.ArgumentList.Add("--download");
+        foreach (var pair in pairs) startInfo.ArgumentList.Add(pair);
+        foreach (var argument in new[] { "--model-dir", _modelDirectory, "--no-ui", "--no-check-update" })
+            startInfo.ArgumentList.Add(argument);
 
         using var process = Process.Start(startInfo);
         if (process is null)
@@ -194,6 +193,11 @@ public sealed class TranslationServer : IDisposable
         process.ErrorDataReceived += (_, args) => AppendLog(args.Data);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+        using var cancellation = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        });
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         return process.ExitCode == 0;
     }
@@ -209,6 +213,10 @@ public sealed class TranslationServer : IDisposable
                     cancellationToken)
                 .ConfigureAwait(false);
             return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception)
         {

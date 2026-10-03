@@ -30,9 +30,9 @@ public class SpeechSegmenterTests
         var segments = Run(voiceFrames: 80, silenceBefore: 40, silenceAfter: 80);
 
         var segment = Assert.Single(segments);
-        // Il pre-roll fa partire il segmento sull'attacco reale del parlato, non sul frame che ha aperto l'enunciato.
+        // Il timestamp include il margine di pre-roll effettivamente presente nei campioni.
         var expectedStart = 40 * Frame / 16000.0;
-        Assert.InRange(segment.Start.TotalSeconds, expectedStart - 0.05, expectedStart + 0.05);
+        Assert.InRange(segment.Start.TotalSeconds, expectedStart - 0.16, expectedStart);
     }
 
     [Fact]

@@ -16,7 +16,7 @@ public sealed class SpeakerTracker : IDisposable
 
     private readonly NeMoDiarizationClient _client;
     private readonly object _gate = new();
-    private readonly List<float> _buffer = [];
+    private readonly Audio.FloatRingBuffer _buffer = new(MaxSeconds * SampleRate);
     private List<GlobalSegment> _segments = [];
     private long _totalSamples;
     private double _bufferStartSeconds;
@@ -44,16 +44,9 @@ public sealed class SpeakerTracker : IDisposable
         var shouldRun = false;
         lock (_gate)
         {
-            _buffer.AddRange(samples.ToArray());
+            _buffer.Write(samples);
             _totalSamples += samples.Length;
-
-            var maxSamples = MaxSeconds * SampleRate;
-            if (_buffer.Count > maxSamples)
-            {
-                var drop = _buffer.Count - maxSamples;
-                _buffer.RemoveRange(0, drop);
-                _bufferStartSeconds += drop / (double)SampleRate;
-            }
+            _bufferStartSeconds = (_totalSamples - _buffer.Count) / (double)SampleRate;
 
             if (!_busy
                 && peak >= 0.01f
@@ -99,17 +92,23 @@ public sealed class SpeakerTracker : IDisposable
             foreach (var word in words)
             {
                 var center = (utteranceStart + word.Start + (word.Duration / 2)).TotalSeconds;
-                var exact = _segments
-                    .Where(segment => center >= segment.Start - 0.05 && center <= segment.End + 0.05)
-                    .Select(segment => segment.Speaker)
-                    .Cast<int?>()
-                    .FirstOrDefault();
-                var speaker = exact
-                    ?? _segments
-                        .OrderBy(segment => Distance(center, segment))
-                        .Select(segment => segment.Speaker)
-                        .DefaultIfEmpty(0)
-                        .First();
+                var speaker = 0;
+                var nearest = double.MaxValue;
+                foreach (var segment in _segments)
+                {
+                    if (center >= segment.Start - 0.05 && center <= segment.End + 0.05)
+                    {
+                        speaker = segment.Speaker;
+                        break;
+                    }
+
+                    var distance = Distance(center, segment);
+                    if (distance < nearest)
+                    {
+                        nearest = distance;
+                        speaker = segment.Speaker;
+                    }
+                }
                 result.Add(word with { Speaker = speaker });
             }
 
@@ -125,7 +124,7 @@ public sealed class SpeakerTracker : IDisposable
         long samples;
         lock (_gate)
         {
-            audio = [.. _buffer];
+            audio = _buffer.Snapshot();
             start = _bufferStartSeconds;
             samples = _totalSamples;
         }
@@ -140,8 +139,6 @@ public sealed class SpeakerTracker : IDisposable
                     _segments = Map(segments, start);
                 }
 
-                _lastRun = DateTime.UtcNow;
-                _samplesAtLastRun = samples;
             }
         }
         catch (Exception)
@@ -152,6 +149,9 @@ public sealed class SpeakerTracker : IDisposable
         {
             lock (_gate)
             {
+                // Anche un errore deve rispettare l'intervallo: niente retry a ogni frame.
+                _lastRun = DateTime.UtcNow;
+                _samplesAtLastRun = samples;
                 _busy = false;
             }
         }
@@ -165,6 +165,7 @@ public sealed class SpeakerTracker : IDisposable
     private List<GlobalSegment> Map(IReadOnlyList<DiarizationSegment> raw, double bufferStart)
     {
         var map = new Dictionary<int, int>();
+        var assigned = new HashSet<int>();
         foreach (var speaker in raw.Select(segment => segment.Speaker).Distinct())
         {
             var overlaps = new Dictionary<int, double>();
@@ -184,9 +185,10 @@ public sealed class SpeakerTracker : IDisposable
                 }
             }
 
-            map[speaker] = overlaps.Count > 0
-                ? overlaps.OrderByDescending(pair => pair.Value).First().Key
-                : _nextSpeaker++;
+            var match = overlaps.Where(pair => !assigned.Contains(pair.Key))
+                .OrderByDescending(pair => pair.Value).FirstOrDefault();
+            map[speaker] = match.Value > 0 ? match.Key : _nextSpeaker++;
+            assigned.Add(map[speaker]);
         }
 
         return

@@ -26,8 +26,11 @@ public class RealtimeStopTests
         var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(6)));
 
         Assert.Same(run, completed);
+        Assert.False(transcriber.WorkersCompletion.IsCompleted,
+            "il timeout di stop non equivale alla fine del decoder nativo");
         engine.Release();
         await run;
+        await transcriber.WorkersCompletion.WaitAsync(TimeSpan.FromSeconds(3));
         Assert.False(engine.Disposed, "il motore appartiene al pool e non va liberato durante lo stop");
     }
 

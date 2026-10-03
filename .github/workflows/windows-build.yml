@@ -1,0 +1,79 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore WisperTranslator.sln
+      - name: Build
+        run: dotnet build WisperTranslator.sln -c Release --no-restore --nologo
+      - name: Test (including Windows PDF tests)
+        run: dotnet test WisperTranslator.sln -c Release --no-build --logger "trx;LogFileName=windows.trx" --results-directory TestResults --nologo
+      - name: Publish Windows x64
+        run: dotnet publish src/WisperTranslator.App -c Release -r win-x64 --self-contained true -p:SatelliteResourceLanguages=en -o publish/app --nologo
+
+      - name: Native bar smoke test
+        run: |
+          $log = Join-Path $env:LOCALAPPDATA 'WisperTranslator/logs/bar-selftest.txt'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+          $app = Start-Process -FilePath "$PWD/publish/app/WisperTranslator.App.exe" -ArgumentList '--bar-selftest' -PassThru
+          if (-not $app.WaitForExit(60000)) {
+            Stop-Process -Id $app.Id -Force
+            throw 'Bar self-test timed out'
+          }
+          if (-not (Test-Path $log)) { throw 'Bar self-test did not produce a result' }
+          $result = Get-Content $log -Raw
+          Write-Host $result
+          if ($app.ExitCode -ne 0 -or $result -notmatch 'PASS:' -or $result -match 'FAIL:') {
+            throw 'Native bar self-test failed'
+          }
+
+      - name: Package portable build
+        run: |
+          Copy-Item installer/portable-readme.txt publish/app/LEGGIMI.txt
+          Copy-Item LICENSE, THIRD-PARTY-NOTICES.md publish/app/
+          $package = 'publish/WisperTranslator-Windows-x64.zip'
+          Compress-Archive -Path publish/app/* -DestinationPath $package
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WisperTranslator-Windows-x64.zip" | Set-Content "$package.sha256" -Encoding ascii
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: WisperTranslator-Windows-x64
+          path: |
+            publish/WisperTranslator-Windows-x64.zip
+            publish/WisperTranslator-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test results and native diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Windows-test-results
+          path: |
+            TestResults/*.trx
+            ~/AppData/Local/WisperTranslator/logs/*.log
+            ~/AppData/Local/WisperTranslator/logs/bar-selftest.txt
+          if-no-files-found: warn
+          retention-days: 30

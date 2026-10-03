@@ -18,6 +18,7 @@ public sealed class SileroVad : IVadModel
     private readonly DenseTensor<float> _inputTensor;
     private readonly DenseTensor<float> _stateTensor;
     private readonly DenseTensor<long> _sampleRateTensor;
+    private readonly NamedOnnxValue[] _inputs;
 
     public SileroVad(string modelPath)
     {
@@ -26,10 +27,17 @@ public sealed class SileroVad : IVadModel
             throw new FileNotFoundException($"Modello VAD non trovato: {modelPath}", modelPath);
         }
 
-        _session = new InferenceSession(modelPath);
+        using var options = new SessionOptions { IntraOpNumThreads = 1, InterOpNumThreads = 1 };
+        _session = new InferenceSession(modelPath, options);
         _inputTensor = new DenseTensor<float>(_input, [1, _input.Length]);
         _stateTensor = new DenseTensor<float>(new float[StateSize], [2, 1, 128]);
         _sampleRateTensor = new DenseTensor<long>(new[] { 16000L }, []);
+        _inputs =
+        [
+            NamedOnnxValue.CreateFromTensor("input", _inputTensor),
+            NamedOnnxValue.CreateFromTensor("state", _stateTensor),
+            NamedOnnxValue.CreateFromTensor("sr", _sampleRateTensor),
+        ];
     }
 
     public int FrameSamples => 512;
@@ -44,12 +52,7 @@ public sealed class SileroVad : IVadModel
         _context.CopyTo(_input, 0);
         frame.CopyTo(_input.AsSpan(ContextSize));
 
-        using var results = _session.Run(
-        [
-            NamedOnnxValue.CreateFromTensor("input", _inputTensor),
-            NamedOnnxValue.CreateFromTensor("state", _stateTensor),
-            NamedOnnxValue.CreateFromTensor("sr", _sampleRateTensor),
-        ]);
+        using var results = _session.Run(_inputs);
 
         double probability = 0;
         foreach (var result in results)
@@ -60,7 +63,12 @@ public sealed class SileroVad : IVadModel
             }
             else if (result.Name == "stateN")
             {
-                result.AsTensor<float>().ToArray().CopyTo(_stateTensor.Buffer.Span);
+                var state = result.AsTensor<float>();
+                var destination = _stateTensor.Buffer.Span;
+                for (var index = 0; index < StateSize; index++)
+                {
+                    destination[index] = state.GetValue(index);
+                }
             }
         }
 

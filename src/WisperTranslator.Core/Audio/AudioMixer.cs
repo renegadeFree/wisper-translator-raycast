@@ -23,12 +23,14 @@ public sealed class AudioMixer : IPcmSource, IDisposable
         var produced = 0;
         foreach (var source in _sources)
         {
+            // Anche una sorgente silenziata va drenata: riattivarla non deve riprodurre audio vecchio.
+            var read = source.Read(_scratch.AsSpan(0, destination.Length));
             if (!source.Enabled || source.Gain == 0f)
             {
+                produced = Math.Max(produced, read);
                 continue;
             }
 
-            var read = source.Read(_scratch.AsSpan(0, destination.Length));
             var gain = source.Gain;
             for (var i = 0; i < read; i++)
             {

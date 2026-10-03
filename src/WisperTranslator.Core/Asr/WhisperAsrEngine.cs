@@ -10,6 +10,7 @@ public sealed class WhisperAsrEngine : IAsrEngine
     private readonly WhisperFactory _factory;
     private readonly SemaphoreSlim _decodeGate = new(1, 1);
     private bool _disposed;
+    private int _disposeStarted;
 
     public WhisperAsrEngine(string modelPath, string? name = null, int? threads = null)
     {
@@ -84,28 +85,45 @@ public sealed class WhisperAsrEngine : IAsrEngine
     }
 
     /// <summary>
-    /// Libera il modello nativo. Attende la decodifica in corso: liberare il factory mentre
+    /// Libera il modello nativo dopo la decodifica in corso, senza bloccare la UI: liberare il factory mentre
     /// whisper.cpp sta lavorando provocava un access violation in ggml-cpu-whisper.dll.
     /// </summary>
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
             return;
         }
 
         _disposed = true;
-        var acquired = _decodeGate.Wait(TimeSpan.FromSeconds(15));
+        // La memoria nativa resta viva finché l'ultima decodifica è uscita davvero.
+        // La pulizia differita evita sia un access violation sia un'attesa sulla UI.
+        if (!_decodeGate.Wait(0))
+        {
+            _ = DisposeFactoryAsync();
+            return;
+        }
+
         try
         {
             _factory.Dispose();
         }
         finally
         {
-            if (acquired)
-            {
-                _decodeGate.Release();
-            }
+            _decodeGate.Release();
+        }
+    }
+
+    private async Task DisposeFactoryAsync()
+    {
+        await _decodeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _factory.Dispose();
+        }
+        finally
+        {
+            _decodeGate.Release();
         }
     }
 }

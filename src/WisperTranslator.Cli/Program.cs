@@ -1092,7 +1092,7 @@ internal static class Program
         var diarizationTasks = new List<Task>();
         if (liveTracker is not null)
         {
-            transcriber.AudioBlock += (block, _) => liveTracker.Append(block);
+            transcriber.AudioBlock += (block, _) => liveTracker.Append(block.Span);
             transcriber.FinalResolved += (_, start, __, result) =>
             {
                 diarizationTasks.Add(Task.Run(async () =>

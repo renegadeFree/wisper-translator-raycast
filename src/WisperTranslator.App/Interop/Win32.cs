@@ -56,6 +56,95 @@ internal static class Win32
 
     public static IntPtr Handle(Window window) => new WindowInteropHelper(window).Handle;
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionAttribute data);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AccentPolicy
+    {
+        public int State;
+        public int Flags;
+        public uint Color;
+        public int Animation;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CompositionAttribute
+    {
+        public int Attribute;
+        public IntPtr Data;
+        public nuint Size;
+    }
+
+    /// <summary>
+    /// Compatibilità Windows 10: WCA_ACCENT_POLICY non è un contratto pubblico del SDK.
+    /// Su Windows 11 si usa DWM; se questo fallback fallisce, la barra resta opaca.
+    /// </summary>
+    public static bool SetLegacyAcrylic(Window window, bool enabled)
+    {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763)) return false;
+        var policy = new AccentPolicy { State = enabled ? 4 : 0, Color = 0x30211818 };
+        var size = Marshal.SizeOf<AccentPolicy>();
+        var pointer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(policy, pointer, false);
+            var data = new CompositionAttribute { Attribute = 19, Data = pointer, Size = (nuint)size };
+            return SetWindowCompositionAttribute(Handle(window), ref data) != 0;
+        }
+        catch (EntryPointNotFoundException) { return false; }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor, Work;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
+
+    public static bool TryGetBarBounds(Window window, out NativeRect bounds, out NativeRect work)
+    {
+        var handle = Handle(window);
+        var monitor = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        work = default;
+        if (!GetWindowRect(handle, out bounds) || !GetMonitorInfo(MonitorFromWindow(handle, 2), ref monitor))
+            return false;
+        work = monitor.Work;
+        return true;
+    }
+
+    /// <summary>Overlay senza voce Alt+Tab; il materiale scuro resta leggibile anche col tema chiaro.</summary>
+    public static void MakeFloatingBar(Window window)
+    {
+        var handle = Handle(window);
+        if (handle == IntPtr.Zero) return;
+        SetWindowLong(handle, GwlExStyle, GetWindowLong(handle, GwlExStyle) | WsExToolWindow);
+        var dark = 1;
+        DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
+        var noBorder = unchecked((int)0xFFFFFFFE);
+        DwmSetWindowAttribute(handle, 34, ref noBorder, sizeof(int));
+    }
+
     /// <summary>
     /// Ritaglia davvero l'HWND ad angoli arrotondati: è ciò che impedisce ai pixel acrilici
     /// di riempire il rettangolo attorno alla capsula.

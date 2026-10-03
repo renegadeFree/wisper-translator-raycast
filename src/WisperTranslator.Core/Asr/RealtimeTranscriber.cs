@@ -87,6 +87,10 @@ public sealed class RealtimeTranscriber : IDisposable
     private TimeSpan _streamingStart;
     private long _samplesSeen;
     private bool _disposed;
+    private Task _workers = Task.CompletedTask;
+    private int _lastClosedUtterance;
+
+    internal Task WorkersCompletion => _workers;
 
     public RealtimeTranscriber(
         IPcmSource source,
@@ -121,9 +125,9 @@ public sealed class RealtimeTranscriber : IDisposable
     /// <summary>Audio e parole dell'enunciato appena concluso: servono alla diarizzazione differita.</summary>
     public event Action<int, TimeSpan, float[], AsrResult>? FinalResolved;
 
-    /// <summary>Frase completa arrivata dallo streaming, con i parlanti se il server li ha dati.</summary>
     /// <summary>Ogni blocco audio con il suo tempo: lo usa la diarizzazione a finestra scorrevole.</summary>
-    public event Action<float[], TimeSpan>? AudioBlock;
+    // La memoria è valida durante il callback: chi la conserva deve copiarla.
+    public event Action<ReadOnlyMemory<float>, TimeSpan>? AudioBlock;
 
     /// <summary>Lingua forzata per il motore ASR (null = rilevamento automatico).</summary>
     public string? Language
@@ -148,12 +152,14 @@ public sealed class RealtimeTranscriber : IDisposable
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         await StartStreamingAsync(cancellationToken).ConfigureAwait(false);
 
         // Due corsie indipendenti: i parziali non aspettano mai la rifinitura della frase
         // precedente, che era la causa della sensazione di testo "in ritardo".
         var partialWorker = Task.Run(() => PartialWorkerAsync(cancellationToken), CancellationToken.None);
         var finalWorker = Task.Run(() => FinalWorkerAsync(cancellationToken), CancellationToken.None);
+        _workers = Task.WhenAll(partialWorker, finalWorker);
         var block = new float[_options.BlockSamples];
         var lastPartialAt = DateTime.MinValue;
         var minPartialSamples = (int)(_options.MinPartialSeconds * SampleRate);
@@ -173,7 +179,7 @@ public sealed class RealtimeTranscriber : IDisposable
 
                 if (AudioBlock is not null)
                 {
-                    AudioBlock(block[..read], TimeSpan.FromSeconds(_samplesSeen / (double)SampleRate));
+                    AudioBlock(block.AsMemory(0, read), TimeSpan.FromSeconds(_samplesSeen / (double)SampleRate));
                 }
 
                 _samplesSeen += read;
@@ -188,6 +194,19 @@ public sealed class RealtimeTranscriber : IDisposable
                     _streamingStart = _segmenter.CurrentUtteranceStart;
                 }
 
+                if (_streaming is { IsFaulted: false })
+                {
+                    // Anche il blocco che chiude l'enunciato deve raggiungere il WebSocket.
+                    _streaming.Push(block.AsSpan(0, read));
+                }
+                else if (_streaming is { IsFaulted: true } failed)
+                {
+                    failed.Update -= OnStreamingUpdate;
+                    _streaming = null;
+                    await failed.DisposeAsync().ConfigureAwait(false);
+                    _lastPartialText = null;
+                }
+
                 if (closed.Count > 0)
                 {
                     lock (_gate)
@@ -198,24 +217,14 @@ public sealed class RealtimeTranscriber : IDisposable
                         }
 
                         _pendingPartial = null;
+                        _lastClosedUtterance = currentUtterance;
                         _lastPartialText = null;
                         _lastProvisionalText = string.Empty;
                     }
 
                     wasInSpeech = false;
-                    _finalSignal.Release();
+                    _finalSignal.Release(closed.Count);
                     continue;
-                }
-
-                if (_streaming is { IsFaulted: false })
-                {
-                    _streaming.Push(block.AsSpan(0, read));
-                }
-                else if (_streaming is { IsFaulted: true })
-                {
-                    // La corsia streaming è caduta: si torna ai parziali batch senza fermare nulla.
-                    _streaming = null;
-                    _lastPartialText = null;
                 }
 
                 wasInSpeech = _segmenter.InSpeech;
@@ -225,8 +234,9 @@ public sealed class RealtimeTranscriber : IDisposable
                     && _segmenter.InSpeech
                     && !_partialBusy
                     && now - lastPartialAt >= _partialInterval
-                    && _segmenter.TryCopyCurrentUtterance(out var samples)
-                    && samples.Length >= minPartialSamples)
+                    && _segmenter.CurrentUtteranceSamples >= minPartialSamples
+                    && _segmenter.CurrentUtteranceSamples <= _options.PartialDecodeLimitSeconds * SampleRate
+                    && _segmenter.TryCopyCurrentUtterance(out var samples))
                 {
                     lastPartialAt = now;
                     // Più l'enunciato è lungo, più costa decodificarlo: si dirada invece di accodare.
@@ -266,8 +276,7 @@ public sealed class RealtimeTranscriber : IDisposable
 
             try
             {
-                await Task
-                    .WhenAll(partialWorker, finalWorker)
+                await _workers
                     .WaitAsync(_options.StopTimeout, CancellationToken.None)
                     .ConfigureAwait(false);
             }
@@ -289,10 +298,12 @@ public sealed class RealtimeTranscriber : IDisposable
         {
             await _streaming.StartAsync(_language, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _streaming.Update -= OnStreamingUpdate;
+            var failed = _streaming;
+            failed.Update -= OnStreamingUpdate;
             _streaming = null;
+            await failed.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -321,13 +332,15 @@ public sealed class RealtimeTranscriber : IDisposable
     /// </summary>
     private void OnStreamingUpdate(string text, bool completed)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        var utterance = Volatile.Read(ref _streamingUtterance);
+        if (_disposed || utterance == 0 || utterance <= Volatile.Read(ref _lastClosedUtterance)
+            || string.IsNullOrWhiteSpace(text))
         {
             return;
         }
 
         Update?.Invoke(new TranscriptUpdate(
-            Volatile.Read(ref _streamingUtterance),
+            utterance,
             text.Trim(),
             false,
             _streamingStart,
@@ -394,7 +407,8 @@ public sealed class RealtimeTranscriber : IDisposable
                                        && agreement.CommittedText != _lastPartialText;
                 var provisionalChanged = provisional.Length > 0 && provisional != _lastProvisionalText;
 
-                if (committedChanged || provisionalChanged)
+                if ((committedChanged || provisionalChanged)
+                    && partialUtterance > Volatile.Read(ref _lastClosedUtterance))
                 {
                     _lastPartialText = agreement.CommittedText;
                     _lastProvisionalText = provisional;
@@ -483,7 +497,7 @@ public sealed class RealtimeTranscriber : IDisposable
     {
         try
         {
-            await signal.WaitAsync(TimeSpan.FromMilliseconds(50), cancellationToken).ConfigureAwait(false);
+            await signal.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -536,8 +550,14 @@ public sealed class RealtimeTranscriber : IDisposable
         }
 
         _disposed = true;
-        _signal.Dispose();
-        _finalSignal.Dispose();
+        // Un decoder nativo può ignorare l'annullamento: i semafori restano validi
+        // fino all'uscita effettiva dei worker, anche dopo il timeout dello stop.
+        _ = _workers.ContinueWith(task =>
+        {
+            _ = task.Exception;
+            _signal.Dispose();
+            _finalSignal.Dispose();
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         if (_streaming is not null)
         {
             _streaming.Update -= OnStreamingUpdate;

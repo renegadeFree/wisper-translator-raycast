@@ -49,6 +49,8 @@ public sealed class SpeechSegmenter : IDisposable
 
     public bool InSpeech => _detector.InSpeech;
 
+    public int CurrentUtteranceSamples => _utterance.Count;
+
     /// <summary>Inizio dell'enunciato in corso, in tempo audio.</summary>
     public TimeSpan CurrentUtteranceStart =>
         TimeSpan.FromSeconds(Math.Max(0, _utteranceStartFrame) * _detector.Options.FrameSeconds);
@@ -114,7 +116,9 @@ public sealed class SpeechSegmenter : IDisposable
             }
 
             _silenceTailFrames = 0;
-            _utteranceStartFrame = _framesSeen - _detector.PendingSpeechFrames;
+            // Il tempo deve descrivere anche il pre-roll incluso nell'audio, altrimenti
+            // sottotitoli e diarizzazione risultano spostati rispetto ai campioni.
+            _utteranceStartFrame = _framesSeen - _preRoll.Count - 1;
         }
 
         if (_detector.InSpeech)
@@ -124,11 +128,9 @@ public sealed class SpeechSegmenter : IDisposable
         }
         else
         {
-            _preRoll.Enqueue((float[])_frame.Clone());
-            while (_preRoll.Count > _preRollFrames)
-            {
-                _preRoll.Dequeue();
-            }
+            var frame = _preRoll.Count == _preRollFrames ? _preRoll.Dequeue() : new float[_frame.Length];
+            _frame.CopyTo(frame, 0);
+            _preRoll.Enqueue(frame);
         }
 
         if (signal != EndpointSignal.SpeechEnd && _utterance.Count < _detector.Options.SampleRate * 20)

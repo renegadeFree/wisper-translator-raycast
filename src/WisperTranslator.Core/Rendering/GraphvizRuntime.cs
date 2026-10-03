@@ -70,15 +70,23 @@ public static class GraphvizRuntime
             return null;
         }
 
-        var output = new MemoryStream();
-        var copy = process.StandardOutput.BaseStream.CopyToAsync(output, cancellationToken);
-        var error = process.StandardError.ReadToEndAsync(cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        using var cancellation = token.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        });
+        using var output = new MemoryStream();
+        var copy = process.StandardOutput.BaseStream.CopyToAsync(output, token);
+        var error = process.StandardError.ReadToEndAsync(token);
 
-        await process.StandardInput.WriteAsync(dotSource.AsMemory(), cancellationToken).ConfigureAwait(false);
+        await process.StandardInput.WriteAsync(dotSource.AsMemory(), token).ConfigureAwait(false);
         process.StandardInput.Close();
 
         await copy.ConfigureAwait(false);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        await process.WaitForExitAsync(token).ConfigureAwait(false);
         var message = await error.ConfigureAwait(false);
 
         if (process.ExitCode == 0 && output.Length > 0)

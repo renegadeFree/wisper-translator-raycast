@@ -37,13 +37,14 @@ public sealed record ConceptMap(string Title, IReadOnlyList<ConceptNode> Nodes, 
                 : fallbackTitle;
 
             var nodes = new List<ConceptNode>();
+            var nodeIds = new HashSet<string>(StringComparer.Ordinal);
             if (TryGet(root, "nodes", out var nodesElement) && nodesElement.ValueKind == JsonValueKind.Array)
             {
                 foreach (var node in nodesElement.EnumerateArray())
                 {
                     var id = ReadString(node, "id") ?? ReadString(node, "label");
                     var label = ReadString(node, "label") ?? id;
-                    if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(label))
+                    if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(label) || !nodeIds.Add(id))
                     {
                         continue;
                     }
@@ -64,7 +65,7 @@ public sealed record ConceptMap(string Title, IReadOnlyList<ConceptNode> Nodes, 
                         continue;
                     }
 
-                    if (nodes.All(node => node.Id != from) || nodes.All(node => node.Id != to))
+                    if (!nodeIds.Contains(from) || !nodeIds.Contains(to))
                     {
                         continue;
                     }

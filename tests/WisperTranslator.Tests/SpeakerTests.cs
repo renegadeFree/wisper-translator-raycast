@@ -142,6 +142,7 @@ public class SpeakerTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Windows")]
     public void IlReportConSezionePartecipantiSiGenera()
     {
         var template = BundledTemplates.Pdf("verbale-riunione")!;

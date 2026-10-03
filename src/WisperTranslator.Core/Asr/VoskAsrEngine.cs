@@ -10,6 +10,8 @@ namespace WisperTranslator.Core.Asr;
 public sealed class VoskAsrEngine : IAsrEngine
 {
     private readonly Vosk.Model _model;
+    private readonly object _gate = new();
+    private bool _disposed;
 
     public VoskAsrEngine(string modelDirectory)
     {
@@ -32,26 +34,31 @@ public sealed class VoskAsrEngine : IAsrEngine
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(samples);
-
-        // Pochi secondi costano decine di millisecondi: inutile pagare il costo di un
-        // giro di annullamento per interrompere una decodifica che finisce subito.
-        var watch = Stopwatch.StartNew();
-        var pcm = ToPcm16(samples);
-        string text;
-        using (var recognizer = new Vosk.VoskRecognizer(_model, sampleRate))
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
         {
-            recognizer.AcceptWaveform(pcm, pcm.Length);
-            text = ReadText(recognizer.FinalResult());
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
-        watch.Stop();
-        var audioDuration = TimeSpan.FromSeconds(samples.Length / (double)sampleRate);
-        return Task.FromResult(new AsrResult(
-            AsrTextGuard.TrimRepetitions(text),
-            language,
-            audioDuration,
-            watch.Elapsed,
-            []));
+            // Pochi secondi costano decine di millisecondi: inutile pagare il costo di un
+            // giro di annullamento per interrompere una decodifica che finisce subito.
+            var watch = Stopwatch.StartNew();
+            var pcm = ToPcm16(samples);
+            string text;
+            using (var recognizer = new Vosk.VoskRecognizer(_model, sampleRate))
+            {
+                recognizer.AcceptWaveform(pcm, pcm.Length);
+                text = ReadText(recognizer.FinalResult());
+            }
+
+            watch.Stop();
+            var audioDuration = TimeSpan.FromSeconds(samples.Length / (double)sampleRate);
+            return Task.FromResult(new AsrResult(
+                AsrTextGuard.TrimRepetitions(text),
+                language,
+                audioDuration,
+                watch.Elapsed,
+                []));
+        }
     }
 
     private static byte[] ToPcm16(float[] samples)
@@ -82,5 +89,13 @@ public sealed class VoskAsrEngine : IAsrEngine
         }
     }
 
-    public void Dispose() => _model.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _model.Dispose();
+        }
+    }
 }

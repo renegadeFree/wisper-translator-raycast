@@ -103,6 +103,19 @@ public class HttpDownloadTests : IDisposable
         Assert.Equal(content, await File.ReadAllBytesAsync(destination));
     }
 
+    [Fact]
+    public async Task CompletaIlRenameDiUnFileGiaScaricatoSenzaRete()
+    {
+        var content = Build(4096);
+        var destination = Path.Combine(_directory, "completo.bin");
+        await File.WriteAllBytesAsync(destination + ".part", content);
+        var outcome = await HttpDownload.DownloadVerifiedAsync(
+            "http://127.0.0.1:1/non-raggiungibile", destination, content.Length, Hash(content));
+        Assert.True(outcome.Resumed);
+        Assert.Equal(content, await File.ReadAllBytesAsync(destination));
+        Assert.False(File.Exists(destination + ".part"));
+    }
+
     private static byte[] Build(int size)
     {
         var buffer = new byte[size];

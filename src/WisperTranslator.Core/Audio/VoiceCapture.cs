@@ -17,6 +17,7 @@ public sealed class VoiceCapture : IAudioSource, IDisposable
     private readonly ISampleProvider _pipeline;
     private readonly FloatRingBuffer _buffer;
     private readonly float[] _scratch = new float[8192];
+    private long _resampleRemainder;
     private bool _disposed;
 
     public VoiceCapture(SourceKind kind, string? deviceIdOrName = null, int bufferSeconds = 5)
@@ -61,6 +62,7 @@ public sealed class VoiceCapture : IAudioSource, IDisposable
         }
 
         _buffer.Clear();
+        _resampleRemainder = 0;
         _capture.StartRecording();
         IsRunning = true;
     }
@@ -76,19 +78,31 @@ public sealed class VoiceCapture : IAudioSource, IDisposable
         IsRunning = false;
     }
 
-    public int Read(Span<float> destination) => _buffer.Read(destination);
+    public int Read(Span<float> destination)
+    {
+        var read = _buffer.Read(destination);
+        if (!Enabled)
+        {
+            destination[..read].Clear();
+        }
+
+        return read;
+    }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs args)
     {
         // La catena è pull-based: quanti campioni a 16 kHz corrispondono a questo blocco?
         var frames = args.BytesRecorded / Math.Max(1, CapturedFormat.BlockAlign);
-        var wanted = (int)(frames * (long)SampleRate / CapturedFormat.SampleRate);
+        var scaled = frames * (long)SampleRate + _resampleRemainder;
+        var wanted = (int)(scaled / CapturedFormat.SampleRate);
+        _resampleRemainder = scaled % CapturedFormat.SampleRate;
         if (wanted <= 0)
         {
             return;
         }
 
         var produced = 0;
+        double energy = 0;
         while (produced < wanted)
         {
             var chunk = Math.Min(_scratch.Length, wanted - produced);
@@ -98,29 +112,24 @@ public sealed class VoiceCapture : IAudioSource, IDisposable
                 break;
             }
 
-            _buffer.Write(_scratch.AsSpan(0, read));
+            var samples = _scratch.AsSpan(0, read);
+            if (!Enabled)
+            {
+                samples.Clear();
+            }
+
+            foreach (var sample in samples)
+            {
+                energy += sample * (double)sample;
+            }
+
+            _buffer.Write(samples);
             produced += read;
         }
 
-        UpdateLevel(produced);
-    }
-
-    private void UpdateLevel(int produced)
-    {
-        if (produced <= 0)
-        {
-            Level *= 0.8f;
-            return;
-        }
-
-        var sum = 0f;
-        for (var i = 0; i < produced; i++)
-        {
-            sum += _scratch[i] * _scratch[i];
-        }
-
-        var rms = MathF.Sqrt(sum / produced);
-        Level = Math.Max(rms, Level * 0.8f);
+        Level = produced > 0
+            ? Math.Max((float)Math.Sqrt(energy / produced), Level * 0.8f)
+            : Level * 0.8f;
     }
 
     public void Dispose()

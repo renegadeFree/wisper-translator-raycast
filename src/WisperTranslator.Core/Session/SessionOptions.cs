@@ -46,6 +46,8 @@ public sealed class SessionOptions
 
     public int TranslationPort { get; set; } = 8989;
 
+    public int RetentionDays { get; set; }
+
     /// <summary>
     /// Scrive un log diagnostico della sessione (una riga JSON per aggiornamento): serve per
     /// misurare latenze e comportamento sul campo senza indovinare.

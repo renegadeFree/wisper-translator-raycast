@@ -102,4 +102,17 @@ public sealed class FloatRingBuffer
             _count = 0;
         }
     }
+
+    /// <summary>Copia i campioni in ordine senza consumarli (finestra della diarizzazione).</summary>
+    public float[] Snapshot()
+    {
+        lock (_gate)
+        {
+            var samples = new float[_count];
+            var first = Math.Min(_count, _buffer.Length - _head);
+            _buffer.AsSpan(_head, first).CopyTo(samples);
+            _buffer.AsSpan(0, _count - first).CopyTo(samples.AsSpan(first));
+            return samples;
+        }
+    }
 }

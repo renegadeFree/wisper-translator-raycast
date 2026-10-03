@@ -50,7 +50,8 @@ public static class AudioDevices
                 return enumerator.GetDefaultAudioEndpoint(Flow(kind), Role.Multimedia);
             }
 
-            foreach (var info in List(kind))
+            var devices = List(kind);
+            foreach (var info in devices)
             {
                 if (string.Equals(info.Id, idOrName, StringComparison.OrdinalIgnoreCase))
                 {
@@ -58,7 +59,7 @@ public static class AudioDevices
                 }
             }
 
-            foreach (var info in List(kind))
+            foreach (var info in devices)
             {
                 if (info.Name.Contains(idOrName, StringComparison.OrdinalIgnoreCase))
                 {

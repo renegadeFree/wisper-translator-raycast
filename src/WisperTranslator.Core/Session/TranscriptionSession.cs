@@ -16,6 +16,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private readonly Dictionary<int, Cue> _cues = [];
     private readonly Dictionary<int, int> _translationVersions = [];
     private readonly Dictionary<int, CancellationTokenSource> _pendingTranslations = [];
+    private readonly HashSet<Task> _translationTasks = [];
     private readonly object _cueGate = new();
     private readonly SemaphoreSlim _translationGate = new(2, 2);
     private SessionStore? _history;
@@ -89,6 +90,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
     public async Task StartAsync(IProgress<string>? status = null, CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (IsRunning)
         {
             return;
@@ -143,7 +145,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
                     .EnsureAsync(Report, diarizerPath, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 Report($"Streaming NeMo non disponibile ({exception.Message}): uso i parziali batch.");
                 _realtimeServer = null;
@@ -173,7 +175,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         StartHistory();
         _cancellation = new CancellationTokenSource();
-        _pipeline = Task.WhenAll(_lanes.Select(lane => lane.Transcriber.RunAsync(_cancellation.Token)));
+        _pipeline = Task.WhenAll(_lanes.Select(lane =>
+            Task.Run(() => lane.Transcriber.RunAsync(_cancellation.Token))));
         Report("In ascolto");
     }
 
@@ -207,7 +210,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
             return await NeMoModels.EnsureDiarizerAsync(Options.DiarizerModelId, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LastError = exception.Message;
             report($"Diarizzatore non disponibile ({exception.Message}): continuo senza nomi dei parlanti.");
@@ -217,7 +220,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
     private void StartHistory()
     {
-        _history ??= new SessionStore();
+        _history ??= new SessionStore(retentionDays: Options.RetentionDays);
         if (_history.RecoveredFromCorruption)
         {
             StatusChanged?.Invoke(
@@ -282,7 +285,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
             _translationService = new TranslationService(
                 new LocalHttpEngine(Options.TranslationPort));
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LastError = exception.Message;
             report($"Traduttore non disponibile ({exception.Message}): continuo solo con la trascrizione");
@@ -356,7 +359,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
         lane.Transcriber.Update += update => OnTranscriptUpdate(lane, update);
         if (!lane.SpeakerIsFixed && _speakerTracker is not null)
         {
-            lane.Transcriber.AudioBlock += (block, _) => _speakerTracker?.Append(block);
+            lane.Transcriber.AudioBlock += (block, _) => _speakerTracker?.Append(block.Span);
         }
 
         lane.Transcriber.FinalResolved += (utterance, start, samples, result) =>
@@ -433,7 +436,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
                     turn.Speaker,
                     turn.Text,
                     isFinal: true,
-                    turn.Start,
+                    utteranceStart + turn.Start,
                     turn.Duration,
                     provisional: string.Empty,
                     TimeSpan.Zero);
@@ -456,7 +459,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
         Cue updated;
         lock (_cueGate)
         {
-            if (!_cues.TryGetValue(cueId, out var cue))
+            if (_disposed || !_cues.TryGetValue(cueId, out var cue))
             {
                 return;
             }
@@ -466,17 +469,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
         }
 
         CueUpdated?.Invoke(updated);
-        if (_history is not null && _historySessionId > 0)
-        {
-            try
-            {
-                _history.SaveCue(_historySessionId, updated);
-            }
-            catch (Exception exception)
-            {
-                LastError = exception.Message;
-            }
-        }
+        SaveHistoryCue(updated.Id);
     }
 
     private void OnTranscriptUpdate(Lane lane, TranscriptUpdate update)
@@ -497,7 +490,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
                     turn.Speaker,
                     turn.Text,
                     isFinal: true,
-                    turn.Start,
+                    update.Start + turn.Start,
                     turn.Duration,
                     provisional: string.Empty,
                     update.Latency);
@@ -559,7 +552,10 @@ public sealed class TranscriptionSession : IAsyncDisposable
         Cue cue;
         lock (_cueGate)
         {
+            if (_disposed) return;
             var translation = _cues.TryGetValue(cueId, out var previous) ? previous.Translation : string.Empty;
+            // Un parziale arrivato dopo la decodifica finale non può riaprire la battuta.
+            if (previous is { IsFinal: true } && !isFinal) return;
             cue = new Cue(
                 cueId,
                 text,
@@ -571,7 +567,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
                 provisional,
                 speaker);
             _cues[cueId] = cue;
-            if (isFinal)
+            if (isFinal && previous is not { IsFinal: true })
             {
                 Transcribed++;
             }
@@ -584,17 +580,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
             CueCompleted?.Invoke(cue);
         }
 
-        if (_history is not null && _historySessionId > 0)
-        {
-            try
-            {
-                _history.SaveCue(_historySessionId, cue);
-            }
-            catch (Exception exception)
-            {
-                LastError = exception.Message;
-            }
-        }
+        SaveHistoryCue(cue.Id);
 
         if (Options.Translate && _translationService is not null && cue.Original.Length > 1)
         {
@@ -608,27 +594,29 @@ public sealed class TranscriptionSession : IAsyncDisposable
         CancellationTokenSource cancellation;
         lock (_cueGate)
         {
+            if (_disposed) return;
             if (_pendingTranslations.TryGetValue(cue.Id, out var previous))
             {
                 previous.Cancel();
-                previous.Dispose();
             }
 
-            cancellation = new CancellationTokenSource();
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(_cancellation?.Token ?? CancellationToken.None);
             _pendingTranslations[cue.Id] = cancellation;
+            var version = _translationVersions.GetValueOrDefault(cue.Id) + 1;
+            _translationVersions[cue.Id] = version;
+            var task = TranslateCueAsync(cue, isFinal, version, Options.SourceLanguage, Options.TargetLanguage, cancellation);
+            _translationTasks.Add(task);
+            _ = task.ContinueWith(completed =>
+            {
+                lock (_cueGate) { _translationTasks.Remove(completed); }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
-
-        _ = TranslateCueAsync(cue, isFinal, cancellation.Token);
     }
 
-    private async Task TranslateCueAsync(Cue cue, bool isFinal, CancellationToken cancellationToken)
+    private async Task TranslateCueAsync(Cue cue, bool isFinal, int version, string from, string to,
+        CancellationTokenSource cancellation)
     {
-        int version;
-        lock (_cueGate)
-        {
-            version = _translationVersions.TryGetValue(cue.Id, out var current) ? current + 1 : 1;
-            _translationVersions[cue.Id] = version;
-        }
+        var cancellationToken = cancellation.Token;
 
         try
         {
@@ -643,7 +631,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
             try
             {
                 result = await _translationService!
-                    .TranslateAsync(cue.Original, Options.SourceLanguage, Options.TargetLanguage, cancellationToken)
+                    .TranslateAsync(cue.Original, from, to, cancellationToken)
                     .ConfigureAwait(false);
             }
             finally
@@ -654,6 +642,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
             Cue updated;
             lock (_cueGate)
             {
+                if (_disposed || cancellationToken.IsCancellationRequested || !Options.Translate
+                    || Options.SourceLanguage != from || Options.TargetLanguage != to) return;
                 if (_translationVersions.TryGetValue(cue.Id, out var latest) && latest != version)
                 {
                     return;
@@ -669,6 +659,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
             }
 
             CueUpdated?.Invoke(updated);
+            SaveHistoryCue(updated.Id);
         }
         catch (OperationCanceledException)
         {
@@ -679,7 +670,30 @@ public sealed class TranscriptionSession : IAsyncDisposable
             LastError = exception.Message;
             StatusChanged?.Invoke($"Traduzione non riuscita: {exception.Message}");
         }
+        finally
+        {
+            lock (_cueGate)
+            {
+                if (_pendingTranslations.TryGetValue(cue.Id, out var pending) && ReferenceEquals(pending, cancellation))
+                    _pendingTranslations.Remove(cue.Id);
+                cancellation.Dispose();
+            }
+        }
     }
+
+    private void SaveHistoryCue(int cueId)
+    {
+        lock (_cueGate)
+        {
+            if (_disposed || _history is null || _historySessionId <= 0 || !_cues.TryGetValue(cueId, out var current)) return;
+            try { _history.SaveCue(_historySessionId, current); }
+            catch (Exception exception) { LastError = exception.Message; }
+        }
+    }
+
+    public float CurrentLevel => Math.Max(
+        _systemCapture is { Enabled: true } system ? system.Level : 0,
+        _microphoneCapture is { Enabled: true } microphone ? microphone.Level : 0);
 
     public void SetSystemAudio(bool enabled)
     {
@@ -731,6 +745,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
             await _cancellation.CancelAsync().ConfigureAwait(false);
         }
 
+        foreach (var capture in _captures) Safe(capture.Stop);
+
         if (_pipeline is not null)
         {
             try
@@ -761,16 +777,25 @@ public sealed class TranscriptionSession : IAsyncDisposable
         _disposed = true;
         await StopAsync().ConfigureAwait(false);
 
+        Task translations;
         lock (_cueGate)
         {
             foreach (var pending in _pendingTranslations.Values)
             {
                 pending.Cancel();
-                pending.Dispose();
             }
 
-            _pendingTranslations.Clear();
+            translations = Task.WhenAll(_translationTasks);
         }
+
+        // Lo stop può essere già tornato per timeout; la memoria dei decoder e i servizi
+        // si liberano solo dopo che il lavoro effettivo è terminato.
+        try
+        {
+            await Task.WhenAll(_lanes.Select(lane => lane.Transcriber.WorkersCompletion).Append(translations))
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
 
         Safe(() =>
         {

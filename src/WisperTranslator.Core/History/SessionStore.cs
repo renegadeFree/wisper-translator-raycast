@@ -86,13 +86,15 @@ public sealed class SessionStore : IDisposable
     private readonly SqliteConnection _connection;
     private readonly object _gate = new();
     private bool _disposed;
+    private SqliteCommand? _saveCue;
 
-    public SessionStore(string? databasePath = null, int retentionDays = 5)
+    public SessionStore(string? databasePath = null, int retentionDays = 0)
     {
         DatabasePath = databasePath ?? Path.Combine(Core.AppPaths.Root, "history.db");
+        ArgumentOutOfRangeException.ThrowIfNegative(retentionDays);
         RetentionDays = retentionDays;
 
-        Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(DatabasePath))!);
         try
         {
             _connection = Open(DatabasePath);
@@ -121,7 +123,7 @@ public sealed class SessionStore : IDisposable
     {
         // Pooling disattivato: con il pool attivo la connessione "chiusa" tiene comunque
         // aperto il file, impedendo di mettere da parte un database danneggiato.
-        var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
         try
         {
             connection.Open();
@@ -285,7 +287,11 @@ public sealed class SessionStore : IDisposable
     {
         lock (_gate)
         {
-        using var command = _connection.CreateCommand();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var command = _saveCue;
+        if (command is null)
+        {
+        command = _connection.CreateCommand();
         command.CommandText =
             """
             INSERT INTO cues (session_id, utterance_id, timestamp, audio_start, duration_seconds, original, translation, is_final, speaker)
@@ -299,15 +305,27 @@ public sealed class SessionStore : IDisposable
                 is_final = excluded.is_final,
                 speaker = excluded.speaker;
             """;
-        command.Parameters.AddWithValue("$session", sessionId);
-        command.Parameters.AddWithValue("$utterance", cue.Id);
-        command.Parameters.AddWithValue("$timestamp", cue.CreatedAt.ToString("O"));
-        command.Parameters.AddWithValue("$start", cue.AudioStart.TotalSeconds);
-        command.Parameters.AddWithValue("$duration", cue.Duration.TotalSeconds);
-        command.Parameters.AddWithValue("$original", cue.Original);
-        command.Parameters.AddWithValue("$translation", cue.Translation);
-        command.Parameters.AddWithValue("$final", cue.IsFinal ? 1 : 0);
-        command.Parameters.AddWithValue("$speaker", cue.Speaker);
+        command.Parameters.AddWithValue("$session", DBNull.Value);
+        command.Parameters.AddWithValue("$utterance", DBNull.Value);
+        command.Parameters.AddWithValue("$timestamp", DBNull.Value);
+        command.Parameters.AddWithValue("$start", DBNull.Value);
+        command.Parameters.AddWithValue("$duration", DBNull.Value);
+        command.Parameters.AddWithValue("$original", DBNull.Value);
+        command.Parameters.AddWithValue("$translation", DBNull.Value);
+        command.Parameters.AddWithValue("$final", DBNull.Value);
+        command.Parameters.AddWithValue("$speaker", DBNull.Value);
+        command.Prepare();
+        _saveCue = command;
+        }
+        command.Parameters["$session"].Value = sessionId;
+        command.Parameters["$utterance"].Value = cue.Id;
+        command.Parameters["$timestamp"].Value = cue.CreatedAt.ToString("O");
+        command.Parameters["$start"].Value = cue.AudioStart.TotalSeconds;
+        command.Parameters["$duration"].Value = cue.Duration.TotalSeconds;
+        command.Parameters["$original"].Value = cue.Original;
+        command.Parameters["$translation"].Value = cue.Translation;
+        command.Parameters["$final"].Value = cue.IsFinal ? 1 : 0;
+        command.Parameters["$speaker"].Value = cue.Speaker;
         command.ExecuteNonQuery();
         }
     }
@@ -383,6 +401,7 @@ public sealed class SessionStore : IDisposable
     {
         lock (_gate)
         {
+        if (RetentionDays == 0) return 0;
         var cutoff = (now ?? DateTime.Now).AddDays(-RetentionDays).ToString("O");
 
         using var transaction = _connection.BeginTransaction();
@@ -392,6 +411,9 @@ public sealed class SessionStore : IDisposable
         command.CommandText = "DELETE FROM cues WHERE session_id IN (SELECT id FROM sessions WHERE started_at < $cutoff);";
         command.Parameters.AddWithValue("$cutoff", cutoff);
         var cues = command.ExecuteNonQuery();
+
+        command.CommandText = "DELETE FROM session_notes WHERE session_id IN (SELECT id FROM sessions WHERE started_at < $cutoff);";
+        command.ExecuteNonQuery();
 
         command.CommandText = "DELETE FROM sessions WHERE started_at < $cutoff;";
         var sessions = command.ExecuteNonQuery();
@@ -478,13 +500,12 @@ public sealed class SessionStore : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_gate)
         {
-            return;
+            if (_disposed) return;
+            _disposed = true;
+            _saveCue?.Dispose();
+            _connection.Dispose();
         }
-
-        _disposed = true;
-        _connection.Close();
-        _connection.Dispose();
     }
 }

@@ -28,7 +28,7 @@ public static class AsrBackendFactory
                     .ConfigureAwait(false);
                 return (new VoskAsrEngine(directory), true);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 report($"Vosk non disponibile ({exception.Message}): uso Whisper.");
             }
@@ -43,12 +43,12 @@ public static class AsrBackendFactory
                     .ConfigureAwait(false);
                 if (server is not null)
                 {
-                    return (new NeMoSpeechEngine(server, ownsServer: false, diarize: diarize && diarizerPath is not null), false);
+                    return (new NeMoSpeechEngine(server, ownsServer: false, diarize: diarize && diarizerPath is not null), true);
                 }
 
                 report("NeMo-Speech non disponibile: uso Whisper.");
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 report($"NeMo-Speech non disponibile ({exception.Message}): uso Whisper.");
             }

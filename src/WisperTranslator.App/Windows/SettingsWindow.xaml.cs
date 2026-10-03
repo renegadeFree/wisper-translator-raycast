@@ -955,10 +955,11 @@ public partial class SettingsWindow : FluentWindow
                     using var server = new TranslationServer(executable);
                     foreach (var pair in ModelStore.TranslationPairs)
                     {
-                        await server.DownloadModelsAsync([pair]);
+                        if (!await server.DownloadModelsAsync([pair]))
+                            throw new InvalidOperationException($"Download della coppia {pair} non riuscito.");
                     }
 
-                    return;
+                    return "Modelli di traduzione scaricati.";
                 }
 
                 if (row.Entry.Packaging == ModelPackaging.SingleFile)
@@ -971,6 +972,7 @@ public partial class SettingsWindow : FluentWindow
                         progress.Report((long)(value * Math.Max(1, row.Entry.ExpectedSizeBytes))));
                     await ModelStore.EnsurePackAsync(row.Entry, packProgress);
                 }
+                return $"{row.Name}: download completato.";
             });
     }
 
@@ -987,7 +989,7 @@ public partial class SettingsWindow : FluentWindow
             async _ =>
             {
                 var (ok, message) = await ModelStore.VerifyAsync(row.Entry);
-                ModelStatusText.Text = $"{row.Name}: {(ok ? "integro" : "PROBLEMA")} — {message}";
+                return $"{row.Name}: {(ok ? "integro" : "PROBLEMA")} — {message}";
             });
     }
 
@@ -998,9 +1000,16 @@ public partial class SettingsWindow : FluentWindow
             return;
         }
 
-        ModelStore.Delete(row.Entry);
-        ModelStatusText.Text = $"{row.Name}: eliminato.";
-        RefreshModels();
+        try
+        {
+            ModelStore.Delete(row.Entry);
+            ModelStatusText.Text = $"{row.Name}: eliminato.";
+            RefreshModels();
+        }
+        catch (Exception exception)
+        {
+            ModelStatusText.Text = $"{row.Name}: {exception.Message}";
+        }
     }
 
     private async void OnImportModelClicked(object sender, RoutedEventArgs e)
@@ -1035,7 +1044,7 @@ public partial class SettingsWindow : FluentWindow
     private async Task RunModelOperationAsync(
         ModelCatalogEntry entry,
         string description,
-        Func<IProgress<long>, Task> operation)
+        Func<IProgress<long>, Task<string>> operation)
     {
         ModelProgress.Visibility = Visibility.Visible;
         ModelProgress.Value = 0;
@@ -1050,8 +1059,7 @@ public partial class SettingsWindow : FluentWindow
 
         try
         {
-            await operation(progress);
-            ModelStatusText.Text = "Operazione completata.";
+            ModelStatusText.Text = await operation(progress);
         }
         catch (Exception exception)
         {

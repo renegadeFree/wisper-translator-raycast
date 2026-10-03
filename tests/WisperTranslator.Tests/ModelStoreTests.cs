@@ -63,6 +63,24 @@ public class ModelStoreTests : IDisposable
         Assert.Contains("Dimensione diversa", message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task UnImportErratoNonSostituisceIlModelloInstallato()
+    {
+        var content = new byte[4096];
+        Random.Shared.NextBytes(content);
+        var entry = EntryFor(content) with { RelativePath = "review-test-" + Guid.NewGuid().ToString("N") + "/model.bin" };
+        var destination = ModelStore.PathFor(entry);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        try
+        {
+            await File.WriteAllBytesAsync(destination, content);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => ModelStore.ImportAsync(Write(new byte[4096]), entry));
+            Assert.Equal(content, await File.ReadAllBytesAsync(destination));
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(destination)!, "*.import-*"));
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(destination)!, recursive: true); }
+    }
+
     private string Write(byte[] content)
     {
         var path = Path.Combine(_directory, Guid.NewGuid().ToString("N") + ".bin");
