@@ -463,7 +463,7 @@ public partial class MainWindow : FluentWindow
                 Activate();
             };
             _bar.SettingsRequested += () => OpenSettings(SettingsTabs.Aspetto);
-            _bar.HideRequested += () => _bar?.Hide();
+            _bar.HideRequested += HideBar;
             _bar.Closed += (_, _) => _bar = null;
         }
 
