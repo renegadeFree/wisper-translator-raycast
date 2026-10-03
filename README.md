@@ -115,12 +115,16 @@ Gli screenshot nativi seguenti mostrano **la versione precedente**.
 
 ## Installazione
 
-1. Scarica `WisperTranslator-Setup-x.y.z.exe` dalle release.
-2. Esegui l'installer (non richiede diritti di amministratore).
+1. Scarica `WisperTranslator-Windows-x64.zip` dalle
+   [release di questa edizione](https://github.com/renegadeFree/wisper-translator-raycast/releases).
+2. Estrai **tutti i file** in una cartella e avvia `WisperTranslator.App.exe`.
+   Il runtime .NET è incluso e non servono diritti di amministratore.
 3. Al primo avvio premi **Avvia**: i modelli mancanti vengono scaricati automaticamente in base
    all'hardware rilevato.
 
-> **Avviso di Windows:** l'installer non è firmato digitalmente, quindi SmartScreen può mostrare
+Per generare anche l'installer Inno Setup, segui [Compilare su Windows](docs/BUILD_WINDOWS.md).
+
+> **Avviso di Windows:** l'eseguibile non è firmato digitalmente, quindi SmartScreen può mostrare
 > "Windows ha protetto il PC". Per proseguire: *Ulteriori informazioni* → *Esegui comunque*.
 > Il file è verificabile con l'hash SHA-256 pubblicato nella release.
 

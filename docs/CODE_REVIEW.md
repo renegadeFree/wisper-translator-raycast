@@ -6,7 +6,7 @@ Review del 3 ottobre 2026 sulla copia fornita di Wisper Translator. Il target ri
 
 La copia iniziale non compilava: mancava completamente `src/WisperTranslator.Core/Models`. Il modulo è stato ricostruito dai suoi chiamanti, dai test esistenti e dalle fonti ufficiali dei modelli. Il pattern non ancorato `models/` del `.gitignore` poteva escludere anche questa cartella sorgente su un filesystem Windows: ora è `/models/`.
 
-La soluzione completa compila con **0 errori e 0 avvisi**. La pubblicazione autonoma `win-x64` è stata generata. I **98 test eseguibili sul computer disponibile passano**. Tre test PDF che richiedono i font Windows restano da eseguire su Windows insieme ai controlli su WASAPI, hotkey, DLL native e materiale DWM. Questo rapporto non equivale a una certificazione del comportamento su hardware Windows.
+La soluzione completa compila con **0 errori e 0 avvisi**. La pubblicazione autonoma `win-x64` è stata generata. I **98 test managed eseguibili sul Mac passano**; la successiva CI Windows ha superato **tutti i 101 test**, inclusi i tre PDF con font Windows, e l'autotest nativo della regione HWND arrotondata della barra. Restano i controlli su WASAPI, hotkey, decoder nativi con modelli reali e resa DWM su hardware Windows. Questo rapporto non equivale a una certificazione del comportamento su ogni PC.
 
 ## Problemi rilevati e corretti
 
@@ -107,7 +107,12 @@ Il computer disponibile è un Mac. Per compilare è stato usato `-p:EnableWindow
 
 I test di regressione coprono audio spento, snapshot circolare, cache, retention, note, persistenza della traduzione, parziali tardivi, tempi assoluti dei turni, percorsi dei template, mappe, preferenze, catalogo, import errato che preserva il modello esistente e rename di un download già completo. Il test di stop controlla anche che il timeout non sia confuso con la fine effettiva del decoder.
 
-La build portabile è in `publish/app`; il relativo ZIP contiene anche il runtime .NET e le librerie Windows x64. Non include i grandi modelli, scaricati al primo utilizzo, né un installer Inno Setup firmato. Il server di traduzione viene scaricato dall'app quando necessario. Il pacchetto è stato verificato strutturalmente, non avviato su Windows.
+La build portabile è in `publish/app`; il relativo ZIP contiene anche il runtime .NET e le librerie Windows x64. Non include i grandi modelli, scaricati al primo utilizzo, né un installer Inno Setup firmato. Il server di traduzione viene scaricato dall'app quando necessario. La build della release è generata dalla CI Windows e avviata con `--bar-selftest`; questo controllo non carica modelli né cattura audio.
+
+La prima esecuzione Windows ha evidenziato un test di concorrenza dipendente da un'attesa fissa di 500 ms e da una sorgente sintetica senza pause. Il test ora alimenta due frasi separate e attende il parziale della seconda mentre il decoder finale della prima resta bloccato; il cleanup attende anche la fine effettiva dei worker. Il controllo mantiene l'asserzione funzionale senza dipendere dalla velocità del runner.
+
+La procedura di compilazione, publish e installer è in [BUILD_WINDOWS.md](BUILD_WINDOWS.md).
+Le esecuzioni sono consultabili nella [workflow Windows build](https://github.com/renegadeFree/wisper-translator-raycast/actions/workflows/windows-build.yml).
 
 ## Audit delle dipendenze
 
@@ -134,4 +139,4 @@ Riferimenti: [CVE-2018-8292](https://github.com/advisories/GHSA-7jgj-8wvc-jh57),
 | Posizione e DPI | Resize e snap seguono il monitor corrente; il ripristino iniziale delle coordinate conserva ancora il comportamento basato sul work area principale. | Monitor secondari, DPI misti 100/150/200%, monitor rimosso e coordinate negative. |
 | Latenza totale | Nessuna nuova misura end-to-end di WER, latenza finale, CPU o GPU. | Ripetere le CLI benchmark esistenti sulla macchina Windows, incluse chiamate lunghe e rumore reale. |
 
-La priorità del collaudo Windows è: tutti i test PDF, `--bar-selftest`, avvio reale con modelli, mute, stop e successivo riavvio, blur e DPI misti. Questi controlli sono esplicitamente ancora aperti.
+I test PDF e `--bar-selftest` sono stati superati in CI Windows. La priorità del collaudo manuale resta: avvio reale con modelli, mute, stop e successivo riavvio, blur e DPI misti.
