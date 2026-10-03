@@ -1197,7 +1197,7 @@ mostrata solo su comando, verifica di tutte le funzionalità e prove con 3/4 per
 | F31.3 | Avvio/stop del binario installato | stop in **36 ms**, stato `In pausa`, processo chiuso |
 | F31.4 | Registro eventi Windows | **0 crash `0xc0000005`** e 0 errori `ggml-cpu-whisper` nella finestra di collaudo |
 | F31.5 | Installer | `WisperTranslator-Setup-2.2.0.exe`, 89,8 MB, installazione silenziosa `exit 0` su cartella pulita, versione file **2.2.0.0** |
-| F31.6 | SHA-256 installer | `EBE4F55DF3A1AF52A3DEEA5AED33A846222751689F9579766F25F04024F1AD58` |
+| F31.6 | SHA-256 installer | `D96849308182E7DE3DE9EEE17DFB682603BA2C2D8E61FB06DDC9A5DD9D41837C` |
 | F31.7 | Documentazione | `README.md`, `docs/CONVERSAZIONE.md`, `docs/BENCHMARKS.md`, screenshot rigenerati; `PLAN.md` aggiornato |
 | F31.8 | Release | commit su `main`, tag e release **v2.2.0** con installer e note |
 
