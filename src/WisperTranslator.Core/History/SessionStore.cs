@@ -84,20 +84,135 @@ public sealed class SessionStore : IDisposable
         RetentionDays = retentionDays;
 
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
-        _connection = new SqliteConnection($"Data Source={DatabasePath}");
-        _connection.Open();
-
-        using var command = _connection.CreateCommand();
-        command.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
-        command.ExecuteNonQuery();
-
-        command.CommandText = Schema;
-        command.ExecuteNonQuery();
+        try
+        {
+            _connection = Open(DatabasePath);
+        }
+        catch (SqliteException exception) when (IsCorruption(exception))
+        {
+            // Un database corrotto (tipico dopo un arresto anomala) non deve impedire di
+            // usare il programma: si mette da parte il file e si riparte puliti.
+            RecoveredFromCorruption = true;
+            RecoveryBackupPath = Quarantine(DatabasePath);
+            _connection = Open(DatabasePath);
+        }
     }
 
     public string DatabasePath { get; }
 
     public int RetentionDays { get; }
+
+    /// <summary>True se all'apertura il database era illeggibile ed è stato messo da parte.</summary>
+    public bool RecoveredFromCorruption { get; private set; }
+
+    /// <summary>Dove è finito il vecchio file corrotto (null se non c'è stato recupero).</summary>
+    public string? RecoveryBackupPath { get; private set; }
+
+    private static SqliteConnection Open(string databasePath)
+    {
+        // Pooling disattivato: con il pool attivo la connessione "chiusa" tiene comunque
+        // aperto il file, impedendo di mettere da parte un database danneggiato.
+        var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        try
+        {
+            connection.Open();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            command.ExecuteNonQuery();
+
+            // La corruzione può stare in pagine che lo schema non tocca: il controllo di
+            // integrità la trova prima che diventi un errore a metà sessione.
+            command.CommandText = "PRAGMA quick_check;";
+            if (command.ExecuteScalar() is string check
+                && !check.Equals("ok", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SqliteException($"Verifica di integrità fallita: {check}", 11);
+            }
+
+            command.CommandText = Schema;
+            command.ExecuteNonQuery();
+            return connection;
+        }
+        catch (Exception)
+        {
+            // Senza questa chiusura il file resta bloccato e non si può metterlo da parte.
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    private static bool IsCorruption(SqliteException exception) =>
+        exception.SqliteErrorCode is 11 or 26; // SQLITE_CORRUPT, SQLITE_NOTADB
+
+    /// <summary>Sposta il file danneggiato accanto all'originale e ripulisce i file WAL.</summary>
+    private static string Quarantine(string databasePath)
+    {
+        SqliteConnection.ClearAllPools();
+
+        var backup = $"{databasePath}.corrotto-{DateTime.Now:yyyyMMdd-HHmmss}";
+        if (!TryMove(databasePath, backup))
+        {
+            // Il file è ancora bloccato: si prova a copiarlo e a eliminarlo.
+            try
+            {
+                File.Copy(databasePath, backup, overwrite: true);
+                File.Delete(databasePath);
+            }
+            catch (Exception)
+            {
+                // niente da fare: il recupero proseguirà comunque
+            }
+        }
+
+        foreach (var suffix in new[] { "-wal", "-shm" })
+        {
+            try
+            {
+                if (File.Exists(databasePath + suffix))
+                {
+                    // Messi da parte, non cancellati: in un WAL possono esserci battute
+                    // recenti, e l'utente deve poterle recuperare a mano.
+                    File.Move(databasePath + suffix, backup + suffix, overwrite: true);
+                }
+            }
+            catch (Exception)
+            {
+                try
+                {
+                    File.Delete(databasePath + suffix);
+                }
+                catch (Exception)
+                {
+                    // file WAL bloccato: SQLite lo ricrea comunque
+                }
+            }
+        }
+
+        return backup;
+    }
+
+    private static bool TryMove(string source, string destination)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                File.Move(source, destination, overwrite: true);
+                return true;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(120);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Thread.Sleep(120);
+            }
+        }
+
+        return false;
+    }
 
     public long BeginSession(string sourceLanguage, string targetLanguage)
     {

@@ -35,6 +35,9 @@ public sealed record HardwareProfile(
         ? ("whisper-base-q5_1", "whisper-small-q5_1")
         : ("whisper-base-q5_1", "whisper-base-q5_1");
 
+    /// <summary>Profilo prestazioni consigliato per questa macchina.</summary>
+    public PerformancePreset RecommendedPreset => PerformanceProfile.Recommend(this);
+
     public string Summary =>
         $"{CpuName} · {PhysicalCores} core ({LogicalCores} thread) · {RamMegabytes / 1024.0:F1} GB RAM · "
         + (GpuName is null ? "GPU non rilevata" : $"{GpuName} ({VramMegabytes / 1024.0:F1} GB VRAM)")

@@ -16,6 +16,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -46,7 +47,22 @@
             <Button Content="Apri cartella" Padding="12,5" Margin="0,0,8,6" Click="OnOpenFolderClicked" />
         </WrapPanel>
 
-        <Grid Grid.Row="3" Margin="16,0,16,8">
+        <WrapPanel Grid.Row="3" Margin="16,0,16,8">
+            <TextBlock Text="Template mappa" VerticalAlignment="Center" Margin="0,0,6,6" />
+            <ComboBox x:Name="MapTemplateBox" Width="196" DisplayMemberPath="Name" Margin="0,0,12,6"
+                      SelectionChanged="OnMapTemplateChanged" />
+            <TextBlock Text="Orientamento" VerticalAlignment="Center" Margin="0,0,6,6" />
+            <ComboBox x:Name="MapOrientationBox" Width="130" DisplayMemberPath="Label" Margin="0,0,12,6"
+                      SelectionChanged="OnMapTemplateChanged" />
+            <TextBlock Text="Palette" VerticalAlignment="Center" Margin="0,0,6,6" />
+            <ComboBox x:Name="MapPaletteBox" Width="160" DisplayMemberPath="Label" Margin="0,0,12,6"
+                      SelectionChanged="OnMapTemplateChanged" />
+            <TextBlock Text="Template PDF" VerticalAlignment="Center" Margin="0,0,6,6" />
+            <ComboBox x:Name="PdfTemplateBox" Width="196" DisplayMemberPath="Name" Margin="0,0,12,6"
+                      SelectionChanged="OnPdfTemplateChanged" />
+        </WrapPanel>
+
+        <Grid Grid.Row="4" Margin="16,0,16,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1.1*" />
                 <ColumnDefinition Width="6" />
@@ -96,7 +112,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="4" Padding="16,6" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+        <Border Grid.Row="5" Padding="16,6" Background="{DynamicResource ControlFillColorSecondaryBrush}">
             <TextBlock x:Name="StatusText" Text="Pronto" TextTrimming="CharacterEllipsis" />
         </Border>
     </Grid>

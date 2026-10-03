@@ -26,6 +26,13 @@
                                        TextAlignment="Center"
                                        Foreground="#CCFFFFFF"
                                        FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource Scale}, ConverterParameter=0.62}" />
+                            <TextBlock Text="{Binding ProvisionalTail}"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center"
+                                       FontStyle="Italic"
+                                       Foreground="#99FFFFFF"
+                                       FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource Scale}, ConverterParameter=0.62}"
+                                       Visibility="{Binding HasProvisional, Converter={StaticResource BoolToVisibility}}" />
                             <TextBlock Text="{Binding Translation}"
                                        TextWrapping="Wrap"
                                        TextAlignment="Center"

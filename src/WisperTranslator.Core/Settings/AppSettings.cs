@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WisperTranslator.Core.Hardware;
 using WisperTranslator.Core.Session;
 
 namespace WisperTranslator.Core.Settings;
@@ -50,8 +51,17 @@ public sealed class AppSettings
     /// <summary>Avvio automatico con Windows (voce in HKCU\...\Run).</summary>
     public bool StartWithWindows { get; set; }
 
+    /// <summary>Scrive un log diagnostico per ogni battuta (misure di latenza e carico).</summary>
+    public bool DiagnosticLog { get; set; }
+
     /// <summary>Giorni di conservazione dello storico: 0 = per sempre.</summary>
     public int RetentionDays { get; set; } = 0;
+
+    /// <summary>Template di mappa scelto nel dettaglio sessione.</summary>
+    public string MapTemplateId { get; set; } = "gerarchica-lr";
+
+    /// <summary>Template di report PDF scelto nel dettaglio sessione.</summary>
+    public string PdfTemplateId { get; set; } = "verbale-riunione";
 
     /// <summary>Provider IA predefinito e relative impostazioni (persistite come JSON).</summary>
     public AiSettings Ai { get; set; } = new();
@@ -71,6 +81,29 @@ public sealed class AppSettings
     public string FinalModelId { get; set; } = "whisper-small-q5_1";
 
     public bool Translate { get; set; } = true;
+
+    /// <summary>Profilo prestazioni: Auto segue l'hardware rilevato, gli altri lo forzano.</summary>
+    public PerformancePreset Preset { get; set; } = PerformancePreset.Auto;
+
+    /// <summary>Motore della corsia istantanea; null = quello del profilo.</summary>
+    public AsrBackend? LiveBackend { get; set; }
+
+    /// <summary>Motore della corsia definitiva; null = quello del profilo.</summary>
+    public AsrBackend? FinalBackend { get; set; }
+
+    /// <summary>Runtime accelerato scaricato a parte (null = solo CPU).</summary>
+    public GpuRuntime Gpu { get; set; } = GpuRuntime.Nessuno;
+
+    /// <summary>Profilo risolto per questa macchina, con gli eventuali override dell'utente.</summary>
+    public PerformanceProfile ResolveProfile()
+    {
+        var profile = PerformanceProfile.Resolve(Preset, HardwareDetector.Detect());
+        return profile with
+        {
+            Live = LiveBackend ?? profile.Live,
+            Final = FinalBackend ?? profile.Final,
+        };
+    }
 
     public static string FilePath => Path.Combine(AppPaths.Root, "settings.json");
 
@@ -112,16 +145,23 @@ public sealed class AppSettings
         }
     }
 
-    public SessionOptions ToSessionOptions() => new()
+    public SessionOptions ToSessionOptions()
     {
-        PartialModel = Models.AsrModels.FromId(PartialModelId),
-        FinalModel = Models.AsrModels.FromId(FinalModelId),
-        SourceLanguage = SourceLanguage,
-        TargetLanguage = SourceLanguage == "it" ? "en" : "it",
-        Translate = Translate,
-        SystemAudio = SystemAudio,
-        Microphone = Microphone,
-        SystemDeviceId = SystemDeviceId,
-        MicrophoneDeviceId = MicrophoneDeviceId,
-    };
+        var profile = ResolveProfile();
+        return new SessionOptions
+        {
+            PartialModel = Models.AsrModels.FromId(PartialModelId),
+            FinalModel = Models.AsrModels.FromId(FinalModelId),
+            LiveBackend = profile.Live,
+            FinalBackend = profile.Final,
+            SourceLanguage = SourceLanguage,
+            TargetLanguage = SourceLanguage == "it" ? "en" : "it",
+            Translate = Translate,
+            SystemAudio = SystemAudio,
+            Microphone = Microphone,
+            SystemDeviceId = SystemDeviceId,
+            MicrophoneDeviceId = MicrophoneDeviceId,
+            DiagnosticLog = DiagnosticLog,
+        };
+    }
 }

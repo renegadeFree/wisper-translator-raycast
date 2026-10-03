@@ -8,6 +8,8 @@ namespace WisperTranslator.Core.Asr;
 public sealed class WhisperAsrEngine : IAsrEngine
 {
     private readonly WhisperFactory _factory;
+    private readonly SemaphoreSlim _decodeGate = new(1, 1);
+    private bool _disposed;
 
     public WhisperAsrEngine(string modelPath, string? name = null, int? threads = null)
     {
@@ -32,42 +34,78 @@ public sealed class WhisperAsrEngine : IAsrEngine
         bool useContext = true,
         CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(samples);
         if (sampleRate != 16000)
         {
             throw new ArgumentException("Il motore richiede audio a 16 kHz.", nameof(sampleRate));
         }
 
-        var builder = _factory.CreateBuilder().WithThreads(Threads);
-        if (!useContext)
+        // Una sola decodifica per motore: due context whisper.cpp in parallelo sullo stesso
+        // modello non portano vantaggi e rendono imprevedibile la liberazione della memoria.
+        await _decodeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            // Sulle decodifiche parziali il contesto fa ripetere il modello su frammenti brevi.
-            builder = builder.WithNoContext();
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var builder = _factory.CreateBuilder().WithThreads(Threads);
+            if (!useContext)
+            {
+                // Sulle decodifiche parziali il contesto fa ripetere il modello su frammenti brevi.
+                builder = builder.WithNoContext();
+            }
 
-        if (!string.IsNullOrWhiteSpace(language))
+            if (!string.IsNullOrWhiteSpace(language))
+            {
+                builder = builder.WithLanguage(language);
+            }
+
+            using var processor = builder.Build();
+            var segments = new List<AsrSegment>();
+            var text = new StringBuilder();
+            var watch = Stopwatch.StartNew();
+
+            await foreach (var segment in processor.ProcessAsync(samples, cancellationToken))
+            {
+                text.Append(segment.Text);
+                segments.Add(new AsrSegment(segment.Text.Trim(), segment.Start, segment.End - segment.Start));
+            }
+
+            watch.Stop();
+            var audioDuration = TimeSpan.FromSeconds(samples.Length / (double)sampleRate);
+            // Su audio lungo il modello può entrare in ciclo: meglio una frase tagliata che una
+            // pagina di ripetizioni (che verrebbe anche tradotta e mostrata).
+            var cleanText = AsrTextGuard.TrimRepetitions(text.ToString());
+            return new AsrResult(cleanText, language, audioDuration, watch.Elapsed, segments);
+        }
+        finally
         {
-            builder = builder.WithLanguage(language);
+            _decodeGate.Release();
         }
-
-        using var processor = builder.Build();
-        var segments = new List<AsrSegment>();
-        var text = new StringBuilder();
-        var watch = Stopwatch.StartNew();
-
-        await foreach (var segment in processor.ProcessAsync(samples, cancellationToken))
-        {
-            text.Append(segment.Text);
-            segments.Add(new AsrSegment(segment.Text.Trim(), segment.Start, segment.End - segment.Start));
-        }
-
-        watch.Stop();
-        var audioDuration = TimeSpan.FromSeconds(samples.Length / (double)sampleRate);
-        // Su audio lungo il modello può entrare in ciclo: meglio una frase tagliata che una
-        // pagina di ripetizioni (che verrebbe anche tradotta e mostrata).
-        var cleanText = AsrTextGuard.TrimRepetitions(text.ToString());
-        return new AsrResult(cleanText, language, audioDuration, watch.Elapsed, segments);
     }
 
-    public void Dispose() => _factory.Dispose();
+    /// <summary>
+    /// Libera il modello nativo. Attende la decodifica in corso: liberare il factory mentre
+    /// whisper.cpp sta lavorando provocava un access violation in ggml-cpu-whisper.dll.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        var acquired = _decodeGate.Wait(TimeSpan.FromSeconds(15));
+        try
+        {
+            _factory.Dispose();
+        }
+        finally
+        {
+            if (acquired)
+            {
+                _decodeGate.Release();
+            }
+        }
+    }
 }

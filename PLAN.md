@@ -805,6 +805,212 @@ convenzione di cartelle per libreria (o installare la build scelta direttamente 
 il file `verified.txt` nella cartella del pacchetto è il interruttore. La CPU resta sempre la rete di
 sicurezza per i PC senza GPU. Comandi utili: `-- accel auto`, `-- bench <clip> --model base`.
 
+## 12. Lavorazione v1.1 — fermata sicura e real-time (F12–F17)
+
+Riferimento: piano approvato il 2026-10-03 (fermata sicura, cascata a tre corsie, motori per fascia).
+
+### F12 — Fermata sicura (✅ codice, ⏳ verifica sul campo in F17)
+
+| # | Attività | Esito |
+|---|---|---|
+| F12.1 | Diagnosi del crash allo stop dal registro eventi Windows | ✅ access violation `0xc0000005` in `ggml-cpu-whisper.dll`: il factory nativo veniva liberato con una decodifica in volo |
+| F12.2 | `WhisperAsrEngine`: guardia per motore (una decodifica alla volta) e `Dispose()` che aspetta la decodifica in corso | ✅ |
+| F12.3 | `AsrEnginePool`: i modelli restano caldi tra le sessioni e vengono liberati solo all'uscita | ✅ riavvio sessione senza ricaricare il ggml |
+| F12.4 | `RealtimeTranscriber.RunAsync`: attende sempre i worker (anche su eccezione) con tetto di sicurezza (3 s) | ✅ |
+| F12.5 | Stop senza eccezioni fatali: handler `async void` protetti, eccezioni globali su `logs\errori.log` | ✅ |
+| F12.6 | Test di regressione: stop con decodifica bloccante, stop con motore veloce, coda provvisoria | ✅ 4 test |
+| F12.7 | Recupero automatico dello storico danneggiato: `history.db` illeggibile messo da parte e ricreato, niente errore a schermo | ✅ 2 test |
+| F12.8 | Causa del mancato recupero: il **connection pooling** di Microsoft.Data.Sqlite teneva aperto il file → `Pooling=False` | ✅ |
+| F12.9 | Comando `history check` per diagnosticare/recuperare il database da riga di comando | ✅ |
+
+### F13 — Cascata a tre corsie e UI progressiva (✅ codice)
+
+| # | Attività | Esito |
+|---|---|---|
+| F13.1 | Due worker indipendenti nel trascrittore: parziali e rifinitura non si bloccano più a vicenda | ✅ test `LaRifinituraNonBloccaIParziali` |
+| F13.2 | Testo provvisorio a schermo (coda instabile in corsivo attenuato) accanto al testo stabile | ✅ widget + overlay |
+| F13.3 | Parziali più reattivi: intervallo 500→1200 ms adattivo, audio minimo 0,8 s | ✅ |
+| F13.4 | Traduzione progressiva: debounce 300 ms, annullamento delle versioni superate | ✅ |
+| F13.5 | Policy di consenso resettata a ogni nuovo enunciato (nessun trascinamento del testo) | ✅ |
+
+| Metrica | Prima | Dopo (atteso, da misurare in F17) |
+|---|---|---|
+| Blocco dei parziali durante la rifinitura | 2,0–3,5 s per frase | 0 |
+| Prima comparsa di testo | ~1,5–3 s | ~0,5–0,9 s |
+| Stop con decodifica in volo | crash `0xc0000005` | ritorno entro 1,5 s |
+
+### F14 — NeMo-Speech.cpp: Nemotron streaming + Parakeet (✅ live, ⏳ finale)
+
+Ricognizione (2026-10-03): **NVIDIA NeMo-Speech.cpp v0.2.0**, Apache-2.0, binari Windows
+CPU/Vulkan/CUDA, runtime ggml. Il modello di default è **Nemotron 3.5 ASR Streaming 0.6B**
+(40 lingue, **italiano incluso**, chunk da 160 ms, punteggiatura automatica, 708 MB q8_0).
+Il server locale espone API HTTP compatibili OpenAI e un WebSocket realtime.
+
+| # | Attività | Esito |
+|---|---|---|
+| F14.1 | `NeMoSpeechServer`: runtime scaricato on demand (5,5 MB), avvio come processo figlio, attesa di disponibilità, spegnimento | ✅ |
+| F14.2 | `NeMoSpeechHost`: un solo server condiviso tra le due corsie, spento all'uscita (anche su chiusura anomala) | ✅ |
+| F14.3 | `NeMoSpeechEngine`: POST `/v1/audio/transcriptions` con WAV PCM16 in memoria | ✅ |
+| F14.4 | `NeMoModels`: download del GGUF (708 MB) con verifica di presenza e cancellazione | ✅ |
+| F14.5 | Verifica reale su clip inglese 10,3 s | ✅ **0,90 s, RTF 0,088**, testo con punteggiatura corretto |
+
+| Motore, stessa clip 10,3 s (24 thread) | Tempo | RTF | Punteggiatura |
+|---|---|---|---|
+| Whisper base q5_1 | 0,53 s | 0,051 | no |
+| Whisper small q5_1 | 1,65 s | 0,145 | no |
+| Vosk small-en | 1,23 s (con caricamento modello) | 0,120 | no |
+| **NeMo Nemotron 3.5 q8_0** | **0,90 s** | **0,088** | **sì** |
+
+**Deviazione registrata (D-22):** per la v1.1 la corsia definitiva usa lo **stesso** Nemotron
+invece di un secondo modello Parakeet: un solo download e ~0,9 GB di RAM invece di ~1,6 GB,
+con qualità già superiore a Whisper small. Parakeet TDT 0.6B v3 (CC-BY-4.0, 25 lingue UE)
+resta l'opzione prevista per la corsia finale in una versione successiva.
+
+### F15 — Vosk per i PC minimi (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F15.1 | Pacchetto NuGet `Vosk` 0.3.38 + `VoskAsrEngine` (PCM16 in memoria, nessun processo esterno) | ✅ |
+| F15.2 | `VoskModels`: download ed estrazione automatica del modello it/en (34-50 MB) | ✅ |
+| F15.3 | Verifica reale su clip inglese 10,3 s | ✅ RTF 0,120, testo corretto (senza punteggiatura: la aggiunge la corsia finale) |
+
+### F16 — Profili automatici per fascia hardware (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F16.1 | `PerformancePreset` (Auto/Reattivo/Equilibrato/Qualità) e `PerformanceProfile` con regole su RAM, core e tier | ✅ |
+| F16.2 | `AsrBackend` (Whisper/Vosk/NeMo) scelto per ciascuna corsia, con override manuale | ✅ |
+| F16.3 | Impostazioni: selettore profilo, motori per corsia, "Scarica i modelli del profilo" | ✅ |
+| F16.4 | Fallback automatico a Whisper con messaggio se un motore non è disponibile | ✅ |
+| F16.5 | Comandi CLI `transcribe --engine vosk|nemo` e `live --engine vosk` per le verifiche | ✅ |
+
+### F17 — Collaudo sul campo, installer e release (✅ verificato)
+
+Installer **1.1.0** ricostruito e installato in silenzio (`/VERYSILENT`, codice 0) su
+`C:\Program Files\Wisper Translator`. Collaudo fatto sul binario **installato**, non su quello di
+sviluppo, con la sessione avviata da riga di comando (`--autostart --autostop <secondi>`).
+
+| Metrica | Prima (v1.0.0) | Dopo (v1.1.0) | Come misurata |
+|---|---|---|---|
+| Arresto con "Ferma" | crash `0xc0000005` in `ggml-cpu-whisper.dll` | **84–106 ms**, nessun crash | 3 sessioni reali + registro eventi |
+| Latenza del testo provvisorio | ~500 ms (e bloccata 2–3,5 s a ogni frase finale) | **mediana 137 ms**, p90 236 ms, max 550 ms | `logs\sessione-*.jsonl` |
+| Latenza della frase definitiva | mediana 1.650 ms | **mediana 234 ms**, max 445 ms | idem |
+| Prima comparsa di testo | ~1,5–3 s | ~1,2 s di audio (0,8 s minimo + prima decodifica) | idem |
+| Parole con punteggiatura | no (Whisper base/small) | **sì** (Nemotron) | log e screenshot |
+| Processi residui dopo lo stop | — | **0** (app, NeMo e server di traduzione chiusi) | elenco processi |
+
+**Nota sul collaudo con YouTube:** il video richiesto `fNTBhi-uEf0` viene servito da YouTube con
+il **doppiaggio automatico in italiano**, quindi il test "inglese → italiano" su quel flusso misura
+in realtà italiano + inglese misti. Sul video il sistema ha comunque tenuto **mediana 252 ms** sui
+parziali e **750 ms** sulle finali. La verifica pulita inglese → italiano è stata fatta con le clip
+di prova (sotto), perché l'audio era l'unico presente sul sistema.
+
+**Verifica visiva (clip inglesi, EN → IT):**
+
+```
+I did not understand what you said. Could you repeat it?
+Non ho capito cosa hai detto. Potresti ripeterlo?
+
+The weather is nice today, and we are going to the beach with friends.
+Il tempo è bello oggi, e stiamo andando in spiaggia con gli amici.
+```
+
+| # | Attività | Esito |
+|---|---|---|
+| F17.1 | Installer 1.1.0 (89,7 MB) con Vosk e i runtime nativi inclusi | ✅ |
+| F17.2 | Installazione silenziosa e avvio della versione installata | ✅ |
+| F17.3 | 3 sessioni reali con arresto: nessun evento di crash | ✅ |
+| F17.4 | Analisi delle latenze per fase dal log diagnostico | ✅ |
+| F17.5 | Recupero dello storico danneggiato dell'utente (3 sessioni precedenti recuperate) | ✅ |
+
+**Rinviato e dichiarato (non fatto in questa versione):**
+
+| Voce | Stato | Motivo |
+|---|---|---|
+| Runtime GPU Vulkan/CUDA | ⏳ | La cascata è CPU-first e già sotto i target; l'accelerazione va aggiunta con verifica misurata (NeMo-Speech.cpp ha build Vulkan/CUDA pronte) |
+| Modello Parakeet per la corsia finale | ⏳ | Deviazione D-22: un solo modello (Nemotron) dimezza RAM e download mantenendo qualità superiore a Whisper small |
+| Collaudo su PC di fascia bassa reale (F8.5) | ⏳ | Serve la macchina dell'utente: profilo **Reattivo** (Vosk + Whisper base, ~0,4 GB) |
+| Pubblicazione su GitHub della v1.1.0 | ⏳ | Da fare quando l'utente approva il collaudo |
+
+---
+
+## 13. Lavorazione v1.2 — impostazioni visibili, template di mappe e PDF (F18–F22)
+
+Segnalazioni dell'utente (2026-10-03): «nelle impostazioni non ho notato i nuovi modelli o le nuove
+impostazioni», «vorrei che tra i vari slider ci fosse indicato il valore», «aggiungessi parecchi
+template diversi per la generazione di mappe concettuali (anche orientamento e stile)», «cerca su
+GitHub i migliori skill e integrali», «stessa cosa per i pdf».
+
+### F18 — Impostazioni visibili (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F18.1 | Nuova scheda **Prestazioni**: hardware, profilo, motore effettivo per corsia, stato installazione, RAM stimata, applica/scarica/verifica | ✅ |
+| F18.2 | **Valori sugli slider**: controllo `SliderRow` con etichetta e valore formattato (px, %, frasi, giorni, temperatura) | ✅ |
+| F18.3 | Catalogo completo: **Vosk it/en**, **Nemotron 3.5**, **runtime NeMo**, **runtime Graphviz** oltre a Whisper, VAD e Bergamot | ✅ |
+| F18.4 | `ModelPackaging` (SingleFile/Zip/Runtime) + `ModelStore.EnsurePackAsync` con verifica SHA-256 ed estrazione atomica | ✅ |
+| F18.5 | Hash reali calcolati sui file scaricati (Vosk, NeMo, Nemotron, Graphviz) | ✅ |
+| F18.6 | Selettore runtime GPU (Nessuno/Vulkan/CUDA) marcato sperimentale, con CPU sempre attiva | ✅ |
+| F18.7 | Scheda **Template** con anteprima, importazione, esportazione ed eliminazione | ✅ |
+
+### F19 — Motore di template (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F19.1 | `MapTemplate` (motore Graphviz, orientamento, stile, palette, limiti, istruzioni) | ✅ |
+| F19.2 | `PdfTemplate` (pagina, stile, sezioni `ai/map/transcript/summary/punti`) | ✅ |
+| F19.3 | `TemplateStore`: cartella `templates\{maps,pdfs}`, pacchetto incluso materializzato una volta sola | ✅ |
+| F19.4 | Importazione da **cartella o zip** con `template.json` o `SKILL.md` (front-matter + istruzioni) | ✅ |
+| F19.5 | Avviso esplicito se lo skill parla di Mermaid/Excalidraw/Lark: il disegno resta locale | ✅ |
+| F19.6 | **14 template mappa** inclusi e **8 template PDF** inclusi, con fonte e licenza | ✅ |
+
+### F20 — Graphviz e mappe (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F20.1 | `GraphvizRuntime`: zip portatile ufficiale 16.1.0, **9.767.733 byte**, SHA-256 `733e49626c492242eb8dca30ea627b6ead20710e207998c7933b4909d92d6abc` | ✅ verificato |
+| F20.2 | `DotGraphBuilder`: gruppi come cluster, tinte mescolate con lo sfondo per la leggibilità del testo | ✅ |
+| F20.3 | Numeri sempre con il punto (la cultura italiana produceva `10,5` e mandava in errore DOT) | ✅ |
+| F20.4 | `dpi` solo per il PNG: su PDF alterava la scala e tagliava la mappa | ✅ |
+| F20.5 | Rendering verificato di **tutti i 14 template**: PNG 27-104 KB + PDF, nessun errore | ✅ |
+| F20.6 | Ripiego sul disegno interno se Graphviz non è installato | ✅ |
+
+### F21 — PDF guidato dai template (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F21.1 | `PdfReportBuilder` guidato dal template: copertina, sezioni in ordine, intestazione, piè di pagina, numeri, indice | ✅ |
+| F21.2 | Mappa **vettoriale**: pagina PDF di Graphviz importata con `PdfReader`/`ImportPage`, titolo sulla pagina della mappa | ✅ verificato a 60 dpi, nessun taglio |
+| F21.3 | Sezioni IA come chiamate brevi separate (`AiAssistant.RunTemplateAsync`) | ✅ |
+| F21.4 | Markdown intermedio salvato accanto al PDF | ✅ |
+| F21.5 | Verifica visiva: verbale di riunione 4 pagine, executive summary, appunti di lezione | ✅ |
+
+### F22 — Test e distribuzione (🔄)
+
+| # | Attività | Esito |
+|---|---|---|
+| F22.1 | Test automatici: escape DOT, limiti, orientamento, front-matter, import cartella/zip, report PDF, mappa vettoriale | ✅ **67 test verdi** (erano 51) |
+| F22.2 | Installer **1.2.0** (89,8 MB) e installazione silenziosa | ✅ codice 0, 302 file installati, `libvosk.dll` incluso |
+| F22.3 | Collaudo in UI delle nuove schede | ✅ Prestazioni (motori reali), Template (anteprima Graphviz), Aspetto (valori su tutti gli slider) |
+| F22.4 | Verifica sul binario installato: Nemotron visto come installato (707,7 MB) senza riscaricare | ✅ migrazione dal vecchio percorso |
+| F22.5 | Rendering di tutti i 14 template mappa (PNG + PDF) e generazione di 3 report PDF con mappa vettoriale | ✅ |
+
+**Comandi aggiunti per le verifiche:**
+
+| Comando | Cosa fa |
+|---|---|
+| `wisper map list` | elenca i template di mappa e lo stato di Graphviz |
+| `wisper map all` | disegna tutti i template (PNG + PDF) in `exports\mappe` |
+| `wisper map <id>` | disegna un singolo template |
+| `wisper report list` | elenca i template di report |
+| `wisper report <id> [--dot]` | genera un report di prova con mappa vettoriale e Markdown |
+| `app.exe --settings=<n>` | apre direttamente una scheda delle impostazioni (0 aspetto, 1 prestazioni, 2 modelli, 3 template, 4 storico, 5 IA) |
+
+**Deviazione registrata (D-23):** la mappa vettoriale nel PDF ha la misura naturale del grafo
+scalata nel riquadro utile (Graphviz non applica `page=` in questa build): la pagina della mappa
+può quindi essere più larga o più alta di A4, senza tagli. È il comportamento tipico degli inserti
+di diagramma e resta leggibile a stampa.
+
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.
 - **Enunciato**: porzione di audio compresa tra due silenzi, inviata all'ASR.

@@ -1,5 +1,6 @@
 using System.Text;
 using WisperTranslator.Core.Settings;
+using WisperTranslator.Core.Templates;
 
 namespace WisperTranslator.Core.Ai;
 
@@ -52,6 +53,65 @@ public sealed class AiAssistant : IDisposable
     {
         var raw = await RunAsync(AiTask.ConceptMap, transcript, cancellationToken).ConfigureAwait(false);
         return ConceptMap.Parse(raw);
+    }
+
+    /// <summary>Testo per una sezione di un template PDF (o per un template importato).</summary>
+    public async Task<string> RunTemplateAsync(
+        string instructions,
+        string transcript,
+        int maxWords,
+        CancellationToken cancellationToken = default)
+    {
+        var language = _settings.OutputLanguage.Equals("en", StringComparison.OrdinalIgnoreCase) ? "inglese" : "italiano";
+        var messages = new List<AiChatMessage>
+        {
+            AiChatMessage.System(
+                $"Sei un assistente che lavora su trascrizioni audio e produce documenti. Rispondi in {language}. "
+                + (string.IsNullOrWhiteSpace(instructions) ? string.Empty : instructions + " ")
+                + $"Usa al massimo {Math.Max(40, maxWords)} parole. "
+                + "Attieniti a ciò che è presente nella trascrizione: non inventare nomi, numeri o fatti. "
+                + "Niente preamboli, niente ripetizioni della consegna."),
+            AiChatMessage.User($"Trascrizione:\n{Trim(transcript, 24_000)}"),
+        };
+
+        return await _client.CompleteAsync(messages, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Mappa concettuale guidata dal template: le istruzioni del template definiscono struttura,
+    /// gruppi e limiti; se il modello risponde male si ritenta una volta con una correzione.
+    /// </summary>
+    public async Task<ConceptMap> BuildConceptMapAsync(
+        MapTemplate template,
+        string transcript,
+        CancellationToken cancellationToken = default)
+    {
+        var language = _settings.OutputLanguage.Equals("en", StringComparison.OrdinalIgnoreCase) ? "inglese" : "italiano";
+        var system =
+            "Costruisci una mappa concettuale della trascrizione. Rispondi SOLO con JSON valido, senza testo "
+            + "attorno e senza commenti, in questo formato: "
+            + "{\"title\":\"titolo breve\",\"nodes\":[{\"id\":\"n1\",\"label\":\"concetto\",\"group\":\"tema\"}],"
+            + "\"edges\":[{\"from\":\"n1\",\"to\":\"n2\",\"label\":\"relazione\"}]}. "
+            + $"Le etichette devono essere in {language}, di al massimo {template.Limits.MaxLabelWords} parole. "
+            + $"Usa al massimo {template.Limits.MaxNodes} nodi e {template.Limits.MaxDepth} livelli di profondità. "
+            + "Ogni nodo deve avere un id unico, ogni arco deve riferirsi a id esistenti e ogni nodo dovrebbe avere un "
+            + "\"group\" con il nome del tema. "
+            + template.Instructions;
+
+        var messages = new List<AiChatMessage>
+        {
+            AiChatMessage.System(system),
+            AiChatMessage.User($"Trascrizione:\n{Trim(transcript, 24_000)}"),
+        };
+
+        var map = ConceptMap.Parse(await _client.CompleteAsync(messages, cancellationToken).ConfigureAwait(false), template.Name);
+        if (!map.IsEmpty)
+        {
+            return map;
+        }
+
+        messages.Add(AiChatMessage.User("La risposta precedente non conteneva JSON valido. Rispondi di nuovo SOLO con il JSON."));
+        return ConceptMap.Parse(await _client.CompleteAsync(messages, cancellationToken).ConfigureAwait(false), template.Name);
     }
 
     private IReadOnlyList<AiChatMessage> BuildMessages(AiTask task, string transcript)

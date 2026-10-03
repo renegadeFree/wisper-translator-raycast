@@ -7,6 +7,24 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 
 ![Overlay a schermo intero](docs/screenshots/overlay.png)
 
+## Novità della versione 1.2
+
+- **Impostazioni riorganizzate**: nuova scheda **Prestazioni** (profilo automatico o forzato, motore
+  per corsia, stato dei componenti) e **valore sempre visibile** su ogni slider.
+- **Motori selezionabili per fascia**: Vosk (leggerissimo, ~50 MB) sui PC minimi, **Nemotron 3.5
+  streaming** (~708 MB) su quelli capaci, Whisper come rete di sicurezza.
+- **14 template di mappe concettuali** (radiale, gerarchica, albero, linea del tempo, SWOT, spina di
+  pesce, note colorate…) con orientamento, palette e densità regolabili: il modello scrive la
+  struttura, **Graphviz** la disegna in locale (download di 9 MB al primo uso).
+- **8 template di report PDF** (verbale di riunione, appunti di lezione, intervista, report tecnico,
+  executive summary, trascrizione fedele, brainstorming, post-mortem) con copertina, indice, numeri
+  di pagina e **mappa vettoriale** dentro il PDF.
+- **Template importabili**: una cartella o uno zip con `template.json` oppure un `SKILL.md`
+  (front-matter + istruzioni) diventa un template dell'app. I template sono file modificabili in
+  `%LOCALAPPDATA%\WisperTranslator\templates`.
+- **Storico a prova di errore**: un database danneggiato viene messo da parte e ricreato da solo
+  (`wisper history check` per la diagnostica).
+
 ## Cosa fa
 
 - Cattura l'**audio di sistema** (loopback WASAPI) e/o il **microfono**, con accensione indipendente.

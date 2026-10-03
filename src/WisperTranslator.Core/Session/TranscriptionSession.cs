@@ -15,23 +15,31 @@ public sealed class TranscriptionSession : IAsyncDisposable
 {
     private readonly Dictionary<int, Cue> _cues = [];
     private readonly Dictionary<int, int> _translationVersions = [];
+    private readonly Dictionary<int, CancellationTokenSource> _pendingTranslations = [];
     private readonly object _cueGate = new();
     private SessionStore? _history;
     private readonly bool _ownsHistory;
     private long _historySessionId;
+    private string? _diagnosticPath;
+    private readonly object _diagnosticGate = new();
 
     private AudioMixer? _mixer;
     private VoiceCapture? _systemCapture;
     private VoiceCapture? _microphoneCapture;
     private SpeechSegmenter? _segmenter;
-    private WhisperAsrEngine? _partialEngine;
-    private WhisperAsrEngine? _finalEngine;
+    private IAsrEngine? _partialEngine;
+    private IAsrEngine? _finalEngine;
+    private bool _ownsPartialEngine;
+    private bool _ownsFinalEngine;
     private RealtimeTranscriber? _transcriber;
     private TranslationServer? _translationServer;
     private TranslationService? _translationService;
     private CancellationTokenSource? _cancellation;
     private Task? _pipeline;
     private bool _disposed;
+
+    /// <summary>Attesa prima di tradurre un parziale: evita di tradurre ogni singola parola.</summary>
+    private static readonly TimeSpan ProgressiveTranslationDelay = TimeSpan.FromMilliseconds(300);
 
     public TranscriptionSession(SessionOptions? options = null, SessionStore? history = null)
     {
@@ -77,15 +85,29 @@ public sealed class TranscriptionSession : IAsyncDisposable
         Report("Preparo il rilevatore di voce...");
         await ModelStore.EnsureVadModelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        Report($"Preparo il modello veloce ({Options.PartialModel.Id})...");
-        var partialPath = await ModelStore
-            .EnsureAsrModelAsync(Options.PartialModel, cancellationToken: cancellationToken)
+        Report("Preparo il riconoscitore istantaneo...");
+        var partial = await AsrBackendFactory
+            .CreateAsync(
+                Options.LiveBackend,
+                Options.PartialModel,
+                Options.SourceLanguage,
+                Report,
+                cancellationToken)
             .ConfigureAwait(false);
+        _partialEngine = partial.Engine;
+        _ownsPartialEngine = partial.Owned;
 
-        Report($"Preparo il modello accurato ({Options.FinalModel.Id})...");
-        var finalPath = await ModelStore
-            .EnsureAsrModelAsync(Options.FinalModel, cancellationToken: cancellationToken)
+        Report("Preparo il riconoscitore accurato...");
+        var final = await AsrBackendFactory
+            .CreateAsync(
+                Options.FinalBackend,
+                Options.FinalModel,
+                Options.SourceLanguage,
+                Report,
+                cancellationToken)
             .ConfigureAwait(false);
+        _finalEngine = final.Engine;
+        _ownsFinalEngine = final.Owned;
 
         if (Options.Translate)
         {
@@ -94,7 +116,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
         }
 
         Report("Apro le sorgenti audio...");
-        BuildPipeline(partialPath, finalPath);
+        BuildPipeline();
 
         StartHistory();
         _cancellation = new CancellationTokenSource();
@@ -105,8 +127,47 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private void StartHistory()
     {
         _history ??= new SessionStore();
+        if (_history.RecoveredFromCorruption)
+        {
+            StatusChanged?.Invoke(
+                "Lo storico era danneggiato ed è stato messo da parte: riparto con un archivio nuovo.");
+        }
+
         _history.PurgeExpired();
         _historySessionId = _history.BeginSession(Options.SourceLanguage, Options.TargetLanguage);
+
+        if (Options.DiagnosticLog)
+        {
+            _diagnosticPath = Options.DiagnosticLogPath
+                              ?? Path.Combine(AppPaths.EnsureSubdirectory("logs"), $"sessione-{DateTime.Now:yyyyMMdd-HHmmss}.jsonl");
+            Directory.CreateDirectory(Path.GetDirectoryName(_diagnosticPath)!);
+        }
+    }
+
+    /// <summary>Una riga JSON per aggiornamento: timestamp, tipo, latenza, durata e testo.</summary>
+    private void WriteDiagnostic(Cue cue, TimeSpan latency, int textLength)
+    {
+        if (_diagnosticPath is null)
+        {
+            return;
+        }
+
+        var line = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            t = DateTime.Now.ToString("HH:mm:ss.fff"),
+            utterance = cue.Id,
+            final = cue.IsFinal,
+            audioStart = Math.Round(cue.AudioStart.TotalSeconds, 2),
+            audioDuration = Math.Round(cue.Duration.TotalSeconds, 2),
+            latencyMs = (int)latency.TotalMilliseconds,
+            chars = textLength,
+            text = cue.Original,
+        });
+
+        lock (_diagnosticGate)
+        {
+            File.AppendAllText(_diagnosticPath, line + Environment.NewLine);
+        }
     }
 
     private async Task StartTranslationAsync(Action<string> report, CancellationToken cancellationToken)
@@ -136,7 +197,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
         }
     }
 
-    private void BuildPipeline(string partialModelPath, string finalModelPath)
+    private void BuildPipeline()
     {
         _mixer = new AudioMixer();
 
@@ -159,14 +220,12 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         var vad = new SileroVad(AppPaths.VadModelPath);
         _segmenter = new SpeechSegmenter(vad);
-        _partialEngine = new WhisperAsrEngine(partialModelPath, Options.PartialModel.Id);
-        _finalEngine = new WhisperAsrEngine(finalModelPath, Options.FinalModel.Id);
         _transcriber = new RealtimeTranscriber(
             _mixer,
             _segmenter,
-            _partialEngine,
+            _partialEngine!,
             null,
-            _finalEngine)
+            _finalEngine!)
         {
             Language = Options.SourceLanguage,
         };
@@ -192,7 +251,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
                 update.IsFinal,
                 update.Start,
                 update.Duration,
-                previous?.CreatedAt ?? DateTime.Now);
+                previous?.CreatedAt ?? DateTime.Now,
+                update.Provisional);
             _cues[update.UtteranceId] = cue;
             if (update.IsFinal)
             {
@@ -201,6 +261,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
         }
 
         CueUpdated?.Invoke(cue);
+        WriteDiagnostic(cue, update.Latency, cue.Original.Length);
         if (update.IsFinal)
         {
             CueCompleted?.Invoke(cue);
@@ -220,11 +281,30 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         if (Options.Translate && _translationService is not null && cue.Original.Length > 1)
         {
-            _ = TranslateCueAsync(cue, update.IsFinal);
+            ScheduleTranslation(cue, update.IsFinal);
         }
     }
 
-    private async Task TranslateCueAsync(Cue cue, bool isFinal)
+    /// <summary>Accoda la traduzione annullando quella precedente della stessa battuta.</summary>
+    private void ScheduleTranslation(Cue cue, bool isFinal)
+    {
+        CancellationTokenSource cancellation;
+        lock (_cueGate)
+        {
+            if (_pendingTranslations.TryGetValue(cue.Id, out var previous))
+            {
+                previous.Cancel();
+                previous.Dispose();
+            }
+
+            cancellation = new CancellationTokenSource();
+            _pendingTranslations[cue.Id] = cancellation;
+        }
+
+        _ = TranslateCueAsync(cue, isFinal, cancellation.Token);
+    }
+
+    private async Task TranslateCueAsync(Cue cue, bool isFinal, CancellationToken cancellationToken)
     {
         int version;
         lock (_cueGate)
@@ -235,8 +315,14 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         try
         {
+            if (!isFinal)
+            {
+                // Debounce: mentre l'utente parla il testo si assesta di continuo.
+                await Task.Delay(ProgressiveTranslationDelay, cancellationToken).ConfigureAwait(false);
+            }
+
             var result = await _translationService!
-                .TranslateAsync(cue.Original, Options.SourceLanguage, Options.TargetLanguage)
+                .TranslateAsync(cue.Original, Options.SourceLanguage, Options.TargetLanguage, cancellationToken)
                 .ConfigureAwait(false);
 
             Cue updated;
@@ -257,6 +343,10 @@ public sealed class TranscriptionSession : IAsyncDisposable
             }
 
             CueUpdated?.Invoke(updated);
+        }
+        catch (OperationCanceledException)
+        {
+            // superata da un aggiornamento più recente
         }
         catch (Exception exception)
         {
@@ -325,7 +415,12 @@ public sealed class TranscriptionSession : IAsyncDisposable
         {
             try
             {
-                await _pipeline.ConfigureAwait(false);
+                // Tetto di sicurezza: la decodifica nativa non deve poter bloccare la UI.
+                await _pipeline.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                LastError ??= "Arresto oltre il tempo massimo: la decodifica in corso è stata abbandonata.";
             }
             catch (Exception)
             {
@@ -346,28 +441,69 @@ public sealed class TranscriptionSession : IAsyncDisposable
         _disposed = true;
         await StopAsync().ConfigureAwait(false);
 
-        if (_transcriber is not null)
+        lock (_cueGate)
         {
-            _transcriber.Update -= OnTranscriptUpdate;
-            _transcriber.Dispose();
+            foreach (var pending in _pendingTranslations.Values)
+            {
+                pending.Cancel();
+                pending.Dispose();
+            }
+
+            _pendingTranslations.Clear();
         }
 
-        _partialEngine?.Dispose();
-        _finalEngine?.Dispose();
-        _segmenter?.Dispose();
-        _mixer?.Dispose();
-        _translationService?.Dispose();
-        _translationServer?.Dispose();
-        _cancellation?.Dispose();
+        Safe(() =>
+        {
+            if (_transcriber is not null)
+            {
+                _transcriber.Update -= OnTranscriptUpdate;
+                _transcriber.Dispose();
+            }
+        });
+
+        // Whisper appartiene al pool e resta caldo; Vosk/NeMo sono nostri e si liberano qui.
+        Safe(() =>
+        {
+            if (_ownsPartialEngine)
+            {
+                _partialEngine?.Dispose();
+            }
+        });
+        Safe(() =>
+        {
+            if (_ownsFinalEngine)
+            {
+                _finalEngine?.Dispose();
+            }
+        });
+
+        Safe(() => _segmenter?.Dispose());
+        Safe(() => _mixer?.Dispose());
+        Safe(() => _translationService?.Dispose());
+        Safe(() => _translationServer?.Dispose());
+        Safe(() => _cancellation?.Dispose());
 
         if (_history is not null && _historySessionId > 0)
         {
-            _history.EndSession(_historySessionId);
+            Safe(() => _history.EndSession(_historySessionId));
         }
 
         if (_ownsHistory)
         {
-            _history?.Dispose();
+            Safe(() => _history?.Dispose());
+        }
+    }
+
+    /// <summary>La pulizia non deve mai trasformare uno stop in un errore fatale.</summary>
+    private void Safe(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception)
+        {
+            LastError = exception.Message;
         }
     }
 }

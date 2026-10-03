@@ -11,7 +11,18 @@ public sealed record Cue(
     bool IsFinal,
     TimeSpan AudioStart,
     TimeSpan Duration,
-    DateTime CreatedAt)
+    DateTime CreatedAt,
+    string Provisional = "")
 {
     public bool HasTranslation => Translation.Length > 0;
+
+    /// <summary>Coda dell'ipotesi non ancora confermata, da mostrare attenuata.</summary>
+    public string ProvisionalTail => Provisional.StartsWith(Original, StringComparison.Ordinal)
+        ? Provisional[Original.Length..].TrimStart()
+        : Provisional;
+
+    public bool HasProvisional => !IsFinal && ProvisionalTail.Length > 0;
+
+    /// <summary>Testo originale da mostrare: la parte stabile, o l'ipotesi se non c'è ancora nulla.</summary>
+    public string DisplayOriginal => Original.Length > 0 ? Original : Provisional;
 }

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -8,6 +9,7 @@ using System.Windows.Threading;
 using WisperTranslator.App.Interop;
 using WisperTranslator.App.Windows;
 using WisperTranslator.Core;
+using WisperTranslator.Core.Asr;
 using WisperTranslator.Core.History;
 using WisperTranslator.Core.Session;
 using WisperTranslator.Core.Settings;
@@ -90,8 +92,8 @@ public partial class MainWindow : FluentWindow
             }
         });
         _tray.OverlayToggleRequested += () => Dispatcher.Invoke(ToggleOverlay);
-        _tray.HistoryRequested += () => Dispatcher.Invoke(() => OpenSettings(2));
-        _tray.ModelsRequested += () => Dispatcher.Invoke(() => OpenSettings(1));
+        _tray.HistoryRequested += () => Dispatcher.Invoke(() => OpenSettings(4));
+        _tray.ModelsRequested += () => Dispatcher.Invoke(() => OpenSettings(2));
         _tray.SettingsRequested += () => Dispatcher.Invoke(() => OpenSettings(0));
         _tray.OpenDataFolderRequested += OpenDataFolder;
         _tray.AboutRequested += ShowAbout;
@@ -252,7 +254,18 @@ public partial class MainWindow : FluentWindow
         });
     }
 
-    private async void OnStartStopClicked(object sender, RoutedEventArgs e) => await ToggleSessionAsync();
+    private async void OnStartStopClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await ToggleSessionAsync();
+        }
+        catch (Exception exception)
+        {
+            // Un errore di sessione non deve mai chiudere l'applicazione (era il caso dello stop).
+            SetStatus($"Errore: {exception.Message}");
+        }
+    }
 
     internal async Task ToggleSessionAsync()
     {
@@ -321,15 +334,28 @@ public partial class MainWindow : FluentWindow
         var session = _session;
         _session = null;
         StartButton.IsEnabled = false;
-        await session.DisposeAsync();
-        StartButton.Content = "Avvia";
-        StartButton.Icon = new SymbolIcon(SymbolRegular.Play24);
-        MenuStartStop.Header = "Avvia";
-        MenuStartStop.Icon = new SymbolIcon(SymbolRegular.Play24);
-        StartButton.IsEnabled = true;
-        SetStatus("In pausa");
-        SyncMenus();
-        UpdateTray("In pausa");
+        SetStatus("Arresto…");
+
+        try
+        {
+            // Le decodifiche in corso vengono abbandonate: la UI non deve mai restare appesa.
+            await Task.WhenAny(session.DisposeAsync().AsTask(), Task.Delay(TimeSpan.FromSeconds(6)));
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"Errore in arresto: {exception.Message}");
+        }
+        finally
+        {
+            StartButton.Content = "Avvia";
+            StartButton.Icon = new SymbolIcon(SymbolRegular.Play24);
+            MenuStartStop.Header = "Avvia";
+            MenuStartStop.Icon = new SymbolIcon(SymbolRegular.Play24);
+            StartButton.IsEnabled = true;
+            SetStatus("In pausa");
+            SyncMenus();
+            UpdateTray("In pausa");
+        }
     }
 
     private void OnCueUpdated(Cue cue)
@@ -430,6 +456,33 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     internal void ForceExit() => ExitApplication();
 
+    /// <summary>
+    /// Collaudo automatico dello stop: la sessione parte all'avvio e si ferma dopo N secondi,
+    /// misurando il tempo di arresto. Serve a verificare che "Ferma" non chiuda il programma.
+    /// </summary>
+    internal async Task AutostopAsync(int seconds)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, seconds)));
+        var watch = Stopwatch.StartNew();
+        await ToggleSessionAsync();
+        watch.Stop();
+
+        try
+        {
+            var path = Path.Combine(Core.AppPaths.EnsureSubdirectory("logs"), "autostop.txt");
+            File.AppendAllText(
+                path,
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} stop in {watch.Elapsed.TotalMilliseconds:F0} ms · stato: {StatusText.Text}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // il collaudo non deve mai far fallire la chiusura
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(800));
+        ExitApplication();
+    }
+
     private void OnCopyOriginalClicked(object sender, RoutedEventArgs e) => CopyCue(sender, original: true);
 
     private void OnCopyTranslationClicked(object sender, RoutedEventArgs e) => CopyCue(sender, original: false);
@@ -483,9 +536,9 @@ public partial class MainWindow : FluentWindow
 
     private void OnSettingsClicked(object sender, RoutedEventArgs e) => OpenSettings(0);
 
-    private void OnHistoryMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(2);
+    private void OnHistoryMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(4);
 
-    private void OnModelsMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(1);
+    private void OnModelsMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(2);
 
     private void SetStatus(string message)
     {
@@ -514,7 +567,10 @@ public partial class MainWindow : FluentWindow
         MenuStartStop.Header = _session is { IsRunning: true } ? "Ferma" : "Avvia";
     }
 
-    /// <summary>Apre le impostazioni su una scheda specifica (0 aspetto, 1 modelli, 2 storico, 3 IA).</summary>
+    /// <summary>
+    /// Apre le impostazioni su una scheda specifica:
+    /// 0 aspetto, 1 prestazioni, 2 modelli, 3 template, 4 storico, 5 IA.
+    /// </summary>
     internal void OpenSettings(int tab)
     {
         if (_settingsWindow is { IsVisible: true })
@@ -603,6 +659,8 @@ public partial class MainWindow : FluentWindow
         // Il server di traduzione è un processo figlio: va chiuso prima di uscire.
         _session?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(4));
         _session = null;
+        AsrEnginePool.Clear();
+        NeMoSpeechHost.Shutdown();
 
         _tray?.Dispose();
         Application.Current.Shutdown();

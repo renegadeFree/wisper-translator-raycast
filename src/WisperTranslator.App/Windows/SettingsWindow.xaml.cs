@@ -3,12 +3,15 @@ using System.IO;
 using System.Windows;
 using WisperTranslator.Core;
 using WisperTranslator.Core.Ai;
+using WisperTranslator.Core.Asr;
 using WisperTranslator.Core.Audio;
 using WisperTranslator.Core.Hardware;
 using WisperTranslator.Core.History;
 using WisperTranslator.Core.Models;
 using WisperTranslator.Core.Settings;
 using WisperTranslator.Core.Translation;
+using WisperTranslator.Core.Rendering;
+using WisperTranslator.Core.Templates;
 using Wpf.Ui.Controls;
 
 namespace WisperTranslator.App.Windows;
@@ -18,6 +21,7 @@ public partial class SettingsWindow : FluentWindow
     private readonly AppSettings _settings;
     private readonly Action _onChanged;
     private bool _loading = true;
+    private PerformancePreset _appliedPreset = PerformancePreset.Auto;
 
     public SettingsWindow(AppSettings settings, Action onChanged, int initialTab = 0)
     {
@@ -30,6 +34,7 @@ public partial class SettingsWindow : FluentWindow
         _loading = false;
         RefreshModels();
         RefreshHistory();
+        RefreshTemplates();
 
         if (initialTab > 0)
         {
@@ -42,18 +47,18 @@ public partial class SettingsWindow : FluentWindow
 
     private void LoadControls()
     {
-        FontSlider.Value = _settings.FontSize;
-        OpacitySlider.Value = _settings.Opacity;
-        MaxCuesSlider.Value = _settings.MaxCues;
-        OverlayCuesSlider.Value = _settings.OverlayMaxCues;
-        OverlayFontSlider.Value = _settings.OverlayFontSize;
+        FontRow.Value = _settings.FontSize;
+        OpacityRow.Value = _settings.Opacity;
+        MaxCuesRow.Value = _settings.MaxCues;
+        OverlayCuesRow.Value = _settings.OverlayMaxCues;
+        OverlayFontRow.Value = _settings.OverlayFontSize;
+        RetentionRow.Value = Math.Clamp(_settings.RetentionDays, 0, 90);
         TopmostCheck.IsChecked = _settings.Topmost;
         ShowOriginalCheck.IsChecked = _settings.ShowOriginal;
         TranslateCheck.IsChecked = _settings.Translate;
         OverlayCaptureCheck.IsChecked = _settings.OverlayHiddenFromCapture;
         CloseToTrayCheck.IsChecked = _settings.CloseToTray;
         StartWithWindowsCheck.IsChecked = _settings.StartWithWindows;
-        RetentionSlider.Value = Math.Clamp(_settings.RetentionDays, 0, 90);
 
         PartialModelBox.ItemsSource = AsrModels.All;
         PartialModelBox.SelectedItem = AsrModels.All.First(model => model.Id == _settings.PartialModelId);
@@ -61,6 +66,34 @@ public partial class SettingsWindow : FluentWindow
         FinalModelBox.SelectedItem = AsrModels.All.First(model => model.Id == _settings.FinalModelId);
         ModelHint.Text = "Suggerimento: modello veloce per i parziali, accurato per le frasi finali. "
                          + "Su PC senza GPU conviene 'whisper-base-q5_1' per entrambi.";
+
+        PresetBox.ItemsSource = new[]
+        {
+            new PresetOption(PerformancePreset.Auto, "Automatico (segue il PC)"),
+            new PresetOption(PerformancePreset.Reattivo, "Reattivo — PC minimi"),
+            new PresetOption(PerformancePreset.Equilibrato, "Equilibrato"),
+            new PresetOption(PerformancePreset.Qualita, "Qualità — PC potenti"),
+        };
+        PresetBox.SelectedItem = ((IEnumerable<PresetOption>)PresetBox.ItemsSource)
+            .First(option => option.Value == _settings.Preset);
+        _appliedPreset = _settings.Preset;
+
+        LiveBackendBox.ItemsSource = BackendOptions();
+        LiveBackendBox.SelectedItem = ((IEnumerable<BackendOption>)LiveBackendBox.ItemsSource)
+            .First(option => option.Value == _settings.LiveBackend);
+        FinalBackendBox.ItemsSource = BackendOptions();
+        FinalBackendBox.SelectedItem = ((IEnumerable<BackendOption>)FinalBackendBox.ItemsSource)
+            .First(option => option.Value == _settings.FinalBackend);
+        UpdatePresetHint();
+
+        GpuBox.ItemsSource = new[]
+        {
+            new GpuOption(GpuRuntime.Nessuno, "Solo CPU (consigliato)"),
+            new GpuOption(GpuRuntime.Vulkan, "Vulkan (sperimentale)"),
+            new GpuOption(GpuRuntime.Cuda, "CUDA (sperimentale)"),
+        };
+        GpuBox.SelectedItem = ((IEnumerable<GpuOption>)GpuBox.ItemsSource)
+            .First(option => option.Value == _settings.Gpu);
 
         SystemDeviceBox.ItemsSource = AudioDevices.List(SourceKind.System);
         SystemDeviceBox.SelectedItem = SystemDeviceBox.Items
@@ -77,7 +110,416 @@ public partial class SettingsWindow : FluentWindow
 
     private void OnAppearanceChanged(object sender, RoutedEventArgs e) => ApplyAppearance();
 
+    private void OnAppearanceChanged(object sender, EventArgs e) => ApplyAppearance();
+
+    private static IReadOnlyList<BackendOption> BackendOptions() =>
+    [
+        new BackendOption(null, "Dal profilo"),
+        new BackendOption(AsrBackend.WhisperCpu, "Whisper (CPU)"),
+        new BackendOption(AsrBackend.Vosk, "Vosk (leggero)"),
+        new BackendOption(AsrBackend.NeMoSpeech, "NeMo-Speech"),
+    ];
+
+    private sealed record PresetOption(PerformancePreset Value, string Label);
+
+    private sealed record BackendOption(AsrBackend? Value, string Label);
+
+    private void UpdatePresetHint()
+    {
+        var profile = _settings.ResolveProfile();
+        PresetHint.Text = $"{profile.Label}: {profile.Note}";
+        ProfileSummaryText.Text = DescribeProfile(profile);
+    }
+
+    /// <summary>Riepilogo leggibile: motore, modello e stato di installazione per ogni corsia.</summary>
+    private string DescribeProfile(PerformanceProfile profile)
+    {
+        return $"Testo immediato: {DescribeEngine(profile.Live, live: true)}{Environment.NewLine}"
+               + $"Frase definitiva: {DescribeEngine(profile.Final, live: false)}";
+    }
+
+    private string DescribeEngine(AsrBackend backend, bool live)
+    {
+        switch (backend)
+        {
+            case AsrBackend.Vosk:
+                var installed = VoskModels.IsInstalled(_settings.SourceLanguage);
+                var size = VoskModels.InstalledSize(_settings.SourceLanguage);
+                return $"Vosk {VoskModels.ModelId(_settings.SourceLanguage)} · "
+                       + (installed ? $"installato ({InstalledModel.FormatSize(size)})" : "da scaricare (~50 MB)");
+
+            case AsrBackend.NeMoSpeech:
+                return "NeMo Nemotron 3.5 streaming · "
+                       + (NeMoModels.IsInstalled
+                           ? $"installato ({InstalledModel.FormatSize(NeMoModels.InstalledSize)})"
+                           : "da scaricare (~708 MB)")
+                       + (NeMoSpeechServer.FindExecutable() is null ? " · runtime mancante" : string.Empty);
+
+            default:
+                var id = live ? _settings.PartialModelId : _settings.FinalModelId;
+                var entry = ModelCatalog.ById(id);
+                var present = ModelStore.IsInstalled(entry);
+                return $"Whisper {id} · "
+                       + (present
+                           ? $"installato ({InstalledModel.FormatSize(ModelStore.InstalledSize(entry))})"
+                           : "da scaricare");
+        }
+    }
+
+    private sealed record GpuOption(GpuRuntime Value, string Label);
+
+    private void OnGpuChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _settings.Gpu = (GpuBox.SelectedItem as GpuOption)?.Value ?? GpuRuntime.Nessuno;
+        ProfileStatusText.Text = _settings.Gpu == GpuRuntime.Nessuno
+            ? "Accelerazione GPU disattivata: si usa la CPU."
+            : "Runtime GPU non ancora verificato in questa versione: si continua a usare la CPU. "
+              + "Il percorso verrà attivato solo dopo una misura che ne dimostri il guadagno.";
+        _onChanged();
+    }
+
+    private void OnApplyProfileClicked(object sender, RoutedEventArgs e)
+    {
+        var profile = _settings.ResolveProfile();
+        _settings.PartialModelId = profile.LiveWhisperModelId;
+        _settings.FinalModelId = profile.FinalWhisperModelId;
+        _loading = true;
+        PartialModelBox.SelectedItem = AsrModels.All.FirstOrDefault(model => model.Id == _settings.PartialModelId);
+        FinalModelBox.SelectedItem = AsrModels.All.FirstOrDefault(model => model.Id == _settings.FinalModelId);
+        _loading = false;
+        UpdatePresetHint();
+        _onChanged();
+        RefreshModels();
+        ProfileStatusText.Text = $"Profilo \"{profile.Label}\" applicato.";
+    }
+
+    private async void OnVerifyProfileClicked(object sender, RoutedEventArgs e)
+    {
+        var profile = _settings.ResolveProfile();
+        var lines = new List<string>();
+        foreach (var id in new[] { profile.LiveWhisperModelId, profile.FinalWhisperModelId }.Distinct())
+        {
+            var (ok, message) = await ModelStore.VerifyAsync(ModelCatalog.ById(id));
+            lines.Add($"Whisper {id}: {(ok ? "ok" : "PROBLEMA")} — {message}");
+        }
+
+        if (profile.Live == AsrBackend.Vosk || profile.Final == AsrBackend.Vosk)
+        {
+            lines.Add($"Vosk: {(VoskModels.IsInstalled(_settings.SourceLanguage) ? "installato" : "non installato")}");
+        }
+
+        if (profile.Live == AsrBackend.NeMoSpeech || profile.Final == AsrBackend.NeMoSpeech)
+        {
+            var (ok, message) = await ModelStore.VerifyAsync(ModelCatalog.NeMoRuntime);
+            lines.Add($"Runtime NeMo: {(ok ? "ok" : "PROBLEMA")} — {message}");
+            lines.Add($"Nemotron: {(NeMoModels.IsInstalled ? "installato" : "non installato")}");
+        }
+
+        lines.Add($"Graphviz (mappe): {(GraphvizRuntime.IsInstalled ? "installato" : "non installato")}");
+        ProfileStatusText.Text = string.Join(Environment.NewLine, lines);
+    }
+
+    private void OnPresetChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        var preset = (PresetBox.SelectedItem as PresetOption)?.Value ?? PerformancePreset.Auto;
+        var presetChanged = preset != _appliedPreset;
+        _appliedPreset = preset;
+        _settings.Preset = preset;
+        _settings.LiveBackend = (LiveBackendBox.SelectedItem as BackendOption)?.Value;
+        _settings.FinalBackend = (FinalBackendBox.SelectedItem as BackendOption)?.Value;
+
+        if (presetChanged)
+        {
+            var profile = _settings.ResolveProfile();
+            _settings.PartialModelId = profile.LiveWhisperModelId;
+            _settings.FinalModelId = profile.FinalWhisperModelId;
+            _loading = true;
+            PartialModelBox.SelectedItem = AsrModels.All.FirstOrDefault(model => model.Id == _settings.PartialModelId);
+            FinalModelBox.SelectedItem = AsrModels.All.FirstOrDefault(model => model.Id == _settings.FinalModelId);
+            _loading = false;
+        }
+
+        UpdatePresetHint();
+        _onChanged();
+        RefreshModels();
+    }
+
+    private async void OnDownloadProfileModelsClicked(object sender, RoutedEventArgs e)
+    {
+        var profile = _settings.ResolveProfile();
+        try
+        {
+            foreach (var id in new[] { profile.LiveWhisperModelId, profile.FinalWhisperModelId }.Distinct())
+            {
+                ModelStatusText.Text = $"Preparo {id}…";
+                await ModelStore.EnsureAsrModelAsync(AsrModels.FromId(id));
+            }
+
+            if (profile.Live == AsrBackend.Vosk || profile.Final == AsrBackend.Vosk)
+            {
+                var progress = new Progress<double>(value => ModelStatusText.Text = $"Scarico Vosk… {value:P0}");
+                ModelStatusText.Text = "Scarico il modello Vosk…";
+                await VoskModels.EnsureAsync(_settings.SourceLanguage, progress);
+            }
+
+            if (profile.Live == AsrBackend.NeMoSpeech || profile.Final == AsrBackend.NeMoSpeech)
+            {
+                ModelStatusText.Text = "Scarico il runtime NeMo-Speech…";
+                await NeMoSpeechServer.EnsureExecutableAsync();
+                if (!NeMoModels.IsInstalled)
+                {
+                    var progress = new Progress<double>(value =>
+                        ModelStatusText.Text = $"Scarico Nemotron 3.5… {value:P0} (circa 708 MB)");
+                    await NeMoModels.EnsureAsync(progress);
+                }
+            }
+
+            if (!GraphvizRuntime.IsInstalled)
+            {
+                var progress = new Progress<double>(value => ModelStatusText.Text = $"Scarico Graphviz… {value:P0}");
+                ModelStatusText.Text = "Scarico Graphviz per le mappe…";
+                await GraphvizRuntime.EnsureAsync(progress);
+            }
+
+            ModelStatusText.Text = "Componenti del profilo pronti.";
+        }
+        catch (Exception exception)
+        {
+            ModelStatusText.Text = $"Download non riuscito: {exception.Message}";
+        }
+
+        RefreshModels();
+    }
+
     private void OnAppearanceChanged(object sender, RoutedPropertyChangedEventArgs<double> e) => ApplyAppearance();
+
+    // ---------- Template ----------
+
+    private sealed record TemplateRow(string Name, string Kind, string Summary, string Source, object Template);
+
+    private void OnRefreshTemplatesClicked(object sender, RoutedEventArgs e) => RefreshTemplates();
+
+    /// <summary>Aprendo la scheda Template mostra subito l'anteprima del primo template di mappa.</summary>
+    private void OnTabChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_loading || TemplatePreview.Source is not null)
+        {
+            return;
+        }
+
+        if (Tabs.SelectedIndex != 3 || TemplatesList.Items.Count == 0)
+        {
+            return;
+        }
+
+        if (TemplatesList.Items[0] is TemplateRow row)
+        {
+            _ = PreviewTemplateAsync(row);
+        }
+    }
+
+    private void RefreshTemplates()
+    {
+        var rows = new List<TemplateRow>();
+        rows.AddRange(TemplateStore.Maps().Select(template => new TemplateRow(
+            template.Name,
+            "Mappa",
+            template.Summary,
+            DescribeSource(template.SourceUrl, template.Author, template.License),
+            template)));
+        rows.AddRange(TemplateStore.Pdfs().Select(template => new TemplateRow(
+            template.Name,
+            "PDF",
+            template.Summary,
+            DescribeSource(template.SourceUrl, template.Author, template.License),
+            template)));
+
+        TemplatesList.ItemsSource = rows;
+        TemplateStatusText.Text = $"Mappe: {TemplateStore.Maps().Count} · Report PDF: {TemplateStore.Pdfs().Count} · "
+                                  + $"Graphviz: {(GraphvizRuntime.IsInstalled ? "installato" : "non installato")}";
+    }
+
+    private static string DescribeSource(string? url, string? author, string license)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(author))
+        {
+            parts.Add($"di {author}");
+        }
+
+        parts.Add(license);
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            parts.Add(url);
+        }
+
+        return string.Join(" · ", parts);
+    }
+
+    private async void OnPreviewTemplateClicked(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not TemplateRow row)
+        {
+            return;
+        }
+
+        await PreviewTemplateAsync(row);
+    }
+
+    private async Task PreviewTemplateAsync(TemplateRow row)
+    {
+        if (row.Template is MapTemplate map)
+        {
+            try
+            {
+                if (!GraphvizRuntime.IsInstalled)
+                {
+                    TemplateStatusText.Text = "Scarico Graphviz (9 MB)…";
+                    var download = new Progress<double>(value => TemplateStatusText.Text = $"Scarico Graphviz… {value:P0}");
+                    await GraphvizRuntime.EnsureAsync(download);
+                }
+
+                TemplateStatusText.Text = $"Disegno «{map.Name}»…";
+                var png = await GraphvizRenderer.RenderPngAsync(SampleContent.Map(), map);
+                if (png is null)
+                {
+                    png = GraphvizRenderer.RenderFallbackPng(SampleContent.Map());
+                    TemplateStatusText.Text = $"Anteprima con il disegno interno ({GraphvizRuntime.LastError})";
+                }
+                else
+                {
+                    TemplateStatusText.Text = $"Anteprima di «{map.Name}» generata con Graphviz.";
+                }
+
+                var image = new System.Windows.Media.Imaging.BitmapImage();
+                using (var stream = new MemoryStream(png))
+                {
+                    image.BeginInit();
+                    image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    image.StreamSource = stream;
+                    image.EndInit();
+                }
+
+                TemplatePreview.Source = image;
+            }
+            catch (Exception exception)
+            {
+                TemplateStatusText.Text = $"Anteprima non riuscita: {exception.Message}";
+            }
+
+            return;
+        }
+
+        if (row.Template is PdfTemplate pdf)
+        {
+            try
+            {
+                var directory = AppPaths.EnsureSubdirectory("exports");
+                var path = Path.Combine(directory, $"anteprima-{pdf.Id}.pdf");
+                var session = new HistorySession(0, DateTime.Now, DateTime.Now, "en", "it", 0);
+                PdfReportBuilder.Build(path, session, [], null, null, pdf);
+                TemplateStatusText.Text = $"Anteprima PDF salvata in {path}";
+                Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            }
+            catch (Exception exception)
+            {
+                TemplateStatusText.Text = $"Anteprima non riuscita: {exception.Message}";
+            }
+        }
+    }
+
+    private void OnExportTemplateClicked(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not TemplateRow row)
+        {
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Esporta template",
+            FileName = $"{row.Name}.json",
+            Filter = "Template (*.json)|*.json",
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        if (row.Template is MapTemplate map)
+        {
+            TemplateStore.Export(map, dialog.FileName);
+        }
+        else if (row.Template is PdfTemplate pdf)
+        {
+            TemplateStore.Export(pdf, dialog.FileName);
+        }
+
+        TemplateStatusText.Text = $"Esportato in {dialog.FileName}";
+    }
+
+    private void OnDeleteTemplateClicked(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not TemplateRow row)
+        {
+            return;
+        }
+
+        if (row.Template is MapTemplate map)
+        {
+            TemplateStore.Delete(map);
+        }
+        else if (row.Template is PdfTemplate pdf)
+        {
+            TemplateStore.Delete(pdf);
+        }
+
+        TemplateStatusText.Text = $"«{row.Name}» eliminato (i template inclusi si possono ripristinare "
+                                  + "reimportando il file JSON).";
+        RefreshTemplates();
+    }
+
+    private void OnImportTemplateClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Importa un template o uno skill",
+            Filter = "Template (*.json;*.zip)|*.json;*.zip|Tutti i file (*.*)|*.*",
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var id = TemplateStore.Import(dialog.FileName);
+            TemplateStatusText.Text = $"Importato «{id}»." + (TemplateStore.LastWarning is { } warning
+                ? $" {warning}"
+                : string.Empty);
+            RefreshTemplates();
+        }
+        catch (Exception exception)
+        {
+            TemplateStatusText.Text = $"Importazione non riuscita: {exception.Message}";
+        }
+    }
+
+    private void OnOpenTemplatesFolderClicked(object sender, RoutedEventArgs e)
+    {
+        TemplateStore.EnsureCreated();
+        Process.Start(new ProcessStartInfo { FileName = TemplateStore.Root, UseShellExecute = true });
+    }
 
     private void ApplyAppearance()
     {
@@ -86,18 +528,18 @@ public partial class SettingsWindow : FluentWindow
             return;
         }
 
-        _settings.FontSize = FontSlider.Value;
-        _settings.Opacity = OpacitySlider.Value;
-        _settings.MaxCues = (int)MaxCuesSlider.Value;
-        _settings.OverlayMaxCues = (int)OverlayCuesSlider.Value;
-        _settings.OverlayFontSize = OverlayFontSlider.Value;
+        _settings.FontSize = FontRow.Value;
+        _settings.Opacity = OpacityRow.Value;
+        _settings.MaxCues = (int)MaxCuesRow.Value;
+        _settings.OverlayMaxCues = (int)OverlayCuesRow.Value;
+        _settings.OverlayFontSize = OverlayFontRow.Value;
         _settings.Topmost = TopmostCheck.IsChecked == true;
         _settings.ShowOriginal = ShowOriginalCheck.IsChecked == true;
         _settings.Translate = TranslateCheck.IsChecked == true;
         _settings.OverlayHiddenFromCapture = OverlayCaptureCheck.IsChecked == true;
         _settings.CloseToTray = CloseToTrayCheck.IsChecked == true;
         _settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;
-        _settings.RetentionDays = (int)RetentionSlider.Value;
+        _settings.RetentionDays = (int)RetentionRow.Value;
         _onChanged();
     }
 
@@ -116,7 +558,7 @@ public partial class SettingsWindow : FluentWindow
         AiModelBox.Text = _settings.Ai.Model;
         AiKeyBox.Password = _settings.Ai.ApiKey;
         AiLanguageBox.SelectedIndex = _settings.Ai.OutputLanguage == "en" ? 1 : 0;
-        AiTemperatureSlider.Value = Math.Clamp(_settings.Ai.Temperature, 0, 1);
+        AiTemperatureRow.Value = Math.Clamp(_settings.Ai.Temperature, 0, 1);
         AiMaxTokensBox.Text = _settings.Ai.MaxTokens.ToString();
         AiTimeoutBox.Text = _settings.Ai.TimeoutSeconds.ToString();
         AiSkipReasoningCheck.IsChecked = _settings.Ai.DisableReasoning;
@@ -214,14 +656,14 @@ public partial class SettingsWindow : FluentWindow
         }
     }
 
-    private void OnAiSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void OnAiSliderChanged(object sender, EventArgs e)
     {
         if (_loading)
         {
             return;
         }
 
-        _settings.Ai.Temperature = AiTemperatureSlider.Value;
+        _settings.Ai.Temperature = AiTemperatureRow.Value;
         _onChanged();
     }
 
@@ -315,6 +757,7 @@ public partial class SettingsWindow : FluentWindow
                     entry.DisplayName,
                     size > 0 ? InstalledModel.FormatSize(size) : "non installato",
                     $"{entry.License} · tier {entry.Tier}"
+                    + (entry.Packaging == ModelPackaging.SingleFile ? string.Empty : " · pacchetto")
                     + (installed ? " · installato" : string.Empty)
                     + (entry.ManagedByServer ? " · gestito dal server" : string.Empty),
                     entry.About);
@@ -364,7 +807,16 @@ public partial class SettingsWindow : FluentWindow
                     return;
                 }
 
-                await ModelStore.EnsureAsync(row.Entry, progress);
+                if (row.Entry.Packaging == ModelPackaging.SingleFile)
+                {
+                    await ModelStore.EnsureAsync(row.Entry, progress);
+                }
+                else
+                {
+                    var packProgress = new Progress<double>(value =>
+                        progress.Report((long)(value * Math.Max(1, row.Entry.ExpectedSizeBytes))));
+                    await ModelStore.EnsurePackAsync(row.Entry, packProgress);
+                }
             });
     }
 

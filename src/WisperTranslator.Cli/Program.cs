@@ -10,6 +10,7 @@ using WisperTranslator.Core.History;
 using WisperTranslator.Core.Models;
 using WisperTranslator.Core.Rendering;
 using WisperTranslator.Core.Settings;
+using WisperTranslator.Core.Templates;
 using WisperTranslator.Core.Translation;
 using WisperTranslator.Core.Vad;
 
@@ -51,6 +52,8 @@ internal static class Program
                 "hardware" => Hardware(),
                 "accel" => Acceleration(args[1..]),
                 "history" => History(args[1..]),
+                "map" => await MapAsync(args[1..]),
+                "report" => await ReportAsync(args[1..]),
                 "ai" => await AiAsync(args[1..]),
                 "help" or "--help" or "-h" => Help(),
                 _ => Unknown(args[0]),
@@ -218,8 +221,9 @@ internal static class Program
 
                 if (action == "map")
                 {
+                    var template = TemplateStore.MapOrDefault(GetString(args, "--template", "gerarchica-lr"));
                     Console.Write($"Genero la mappa con {client.ProviderName} ({ai.Model}) ... ");
-                    var map = await client.BuildConceptMapAsync(transcript);
+                    var map = await client.BuildConceptMapAsync(template, transcript);
                     if (map.IsEmpty)
                     {
                         Console.WriteLine("il modello non ha restituito una mappa valida.");
@@ -229,8 +233,10 @@ internal static class Program
                     store.SaveNote(sessionId, $"{ai.DisplayName} · {ai.Model}", conceptMapJson: SerializeMap(map));
                     var output = GetString(args, "--out", null)
                                  ?? Path.Combine(AppPaths.EnsureSubdirectory("exports"), $"mappa-{sessionId}.png");
-                    File.WriteAllBytes(output, ConceptMapRenderer.RenderPng(map));
-                    Console.WriteLine($"{map.Nodes.Count} nodi, {map.Edges.Count} relazioni → {output}");
+                    var png = await GraphvizRenderer.RenderPngAsync(map, template)
+                              ?? GraphvizRenderer.RenderFallbackPng(map);
+                    File.WriteAllBytes(output, png);
+                    Console.WriteLine($"{map.Nodes.Count} nodi, {map.Edges.Count} relazioni · template «{template.Name}» → {output}");
                     return 0;
                 }
 
@@ -263,9 +269,177 @@ internal static class Program
         }
     }
 
+    /// <summary>Elenca o disegna i template di mappa (verifica rapida di Graphviz).</summary>
+    private static async Task<int> MapAsync(string[] args)
+    {
+        var action = args.Length > 0 && !args[0].StartsWith("--") ? args[0].ToLowerInvariant() : "list";
+        if (action == "list")
+        {
+            Console.WriteLine($"Template di mappa ({TemplateStore.Maps().Count}):");
+            foreach (var template in TemplateStore.Maps())
+            {
+                Console.WriteLine($"  {template.Id,-24} {template.Name} · {template.Summary}");
+            }
+
+            Console.WriteLine($"Graphviz: {(GraphvizRuntime.IsInstalled ? "installato" : "non installato")}");
+            return 0;
+        }
+
+        if (!GraphvizRuntime.IsInstalled)
+        {
+            Console.WriteLine("Scarico Graphviz (9 MB)...");
+            var download = new Progress<double>(value => Console.Write($"\r  {value:P0}"));
+            var executable = await GraphvizRuntime.EnsureAsync(download);
+            Console.WriteLine($"\rGraphviz: {executable}");
+        }
+
+        var map = SampleMap();
+        if (action == "all")
+        {
+            var directory = GetString(args, "--out", Path.Combine(AppPaths.EnsureSubdirectory("exports"), "mappe"))!;
+            Directory.CreateDirectory(directory);
+            foreach (var template in TemplateStore.Maps())
+            {
+                var png = await GraphvizRenderer.RenderPngAsync(map, template);
+                if (png is null)
+                {
+                    Console.WriteLine($"  {template.Id,-24} FALLITO: {GraphvizRuntime.LastError}");
+                    continue;
+                }
+
+                await File.WriteAllBytesAsync(Path.Combine(directory, $"{template.Id}.png"), png);
+                var pdf = await GraphvizRenderer.RenderPdfAsync(
+                    map,
+                    template,
+                    Path.Combine(directory, $"{template.Id}.pdf"));
+                Console.WriteLine($"  {template.Id,-24} {png.Length / 1024,5} KB png{(pdf ? " + pdf" : string.Empty)}");
+            }
+
+            Console.WriteLine($"Cartella: {directory}");
+            return 0;
+        }
+
+        var selected = TemplateStore.MapOrDefault(GetString(args, "--template", action));
+        var output = GetString(args, "--out", Path.Combine(AppPaths.EnsureSubdirectory("exports"), $"{selected.Id}.png"))!;
+        var image = await GraphvizRenderer.RenderPngAsync(map, selected);
+        if (image is null)
+        {
+            Console.Error.WriteLine("Rendering non riuscito.");
+            return 1;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        await File.WriteAllBytesAsync(output, image);
+        Console.WriteLine($"{selected.Name}: {output} ({image.Length / 1024} KB)");
+        return 0;
+    }
+
+    /// <summary>Genera un report PDF di prova con i template, per verificare l'impaginazione.</summary>
+    private static async Task<int> ReportAsync(string[] args)
+    {
+        var requested = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
+        if (requested is "list")
+        {
+            Console.WriteLine($"Template PDF ({TemplateStore.Pdfs().Count}):");
+            foreach (var item in TemplateStore.Pdfs())
+            {
+                Console.WriteLine($"  {item.Id,-24} {item.Name} · {item.Summary}");
+            }
+
+            return 0;
+        }
+
+        var template = TemplateStore.PdfOrDefault(requested);
+        var cues = SampleCues();
+        var session = new HistorySession(999, DateTime.Now.AddMinutes(-14), DateTime.Now, "en", "it", cues.Count);
+        var note = new SessionNote(
+            999,
+            "Ollama (locale)",
+            "La sessione spiega come funziona la trascrizione in tempo reale: cattura dell'audio di sistema, "
+            + "modello streaming per il testo immediato, frase definitiva e traduzione locale.",
+            "• Due corsie indipendenti (testo immediato e rifinitura)\n"
+            + "• Traduzione locale con Bergamot\n• Storico su SQLite con recupero automatico",
+            string.Empty,
+            DateTime.Now);
+
+        var map = SampleMap();
+        var mapTemplate = TemplateStore.MapOrDefault(GetString(args, "--map-template", "gerarchica-lr"));
+        var directory = GetString(args, "--out-dir", Path.Combine(AppPaths.EnsureSubdirectory("exports"), "report"))!;
+        Directory.CreateDirectory(directory);
+
+        var landscape = template.Page.Landscape;
+        var pageInches = landscape
+            ? new MapPageInches(11.69 - 1.3, 8.27 - 1.5, 11.69, 8.27)
+            : new MapPageInches(8.27 - 1.3, 11.69 - 1.5, 8.27, 11.69);
+        var mapPdf = Path.Combine(directory, $"mappa-{mapTemplate.Id}.pdf");
+        var vector = await GraphvizRenderer.RenderPdfAsync(map, mapTemplate, mapPdf, pageInches);
+        if (Has(args, "--dot"))
+        {
+            var dotPath = Path.Combine(directory, $"{mapTemplate.Id}.dot");
+            await File.WriteAllTextAsync(dotPath, DotGraphBuilder.Build(map, mapTemplate, pageInches));
+            Console.WriteLine($"DOT: {dotPath}");
+        }
+
+        var generated = template.Sections
+            .Where(section => section.Kind == PdfSectionKind.Ai)
+            .ToDictionary(
+                section => section.Id,
+                section => $"[contenuto di esempio per «{section.Title}»]\n\n"
+                           + string.Join(
+                               "\n",
+                               Enumerable.Range(1, 4).Select(index =>
+                                   $"• Punto {index}: esempio di riga generata dal modello locale secondo le "
+                                   + "istruzioni del template.")));
+
+        var pdfPath = Path.Combine(directory, $"{template.Id}.pdf");
+        PdfReportBuilder.Build(pdfPath, session, cues, note, map, template, generated, vector ? mapPdf : null);
+        var markdownPath = Path.Combine(directory, $"{template.Id}.md");
+        await File.WriteAllTextAsync(markdownPath, PdfReportBuilder.BuildMarkdown(session, cues, note, template, generated));
+
+        Console.WriteLine($"{template.Name}: {pdfPath} ({new FileInfo(pdfPath).Length / 1024} KB)"
+                          + (vector ? " · mappa vettoriale" : " · mappa raster (Graphviz non disponibile)"));
+        Console.WriteLine($"Markdown: {markdownPath}");
+        return 0;
+    }
+
+    private static IReadOnlyList<HistoryCue> SampleCues() =>
+    [
+        new(1, 999, DateTime.Now.AddMinutes(-14), TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(6),
+            "First, let's see how the machine handles the most demanding games.",
+            "Per prima cosa vediamo come la macchina gestisce i giochi più esigenti.", true),
+        new(2, 999, DateTime.Now.AddMinutes(-13), TimeSpan.FromSeconds(6), TimeSpan.FromSeconds(5),
+            "The fan is quiet and the case stays cool even after an hour.",
+            "La ventola è silenziosa e il case resta fresco anche dopo un'ora.", true),
+        new(3, 999, DateTime.Now.AddMinutes(-12), TimeSpan.FromSeconds(11), TimeSpan.FromSeconds(7),
+            "I changed the storage and the memory, and the difference is noticeable.",
+            "Ho cambiato lo storage e la memoria, e la differenza si nota.", true),
+    ];
+
+    private static ConceptMap SampleMap() => SampleContent.Map();
+
     private static int History(string[] args)
     {
         var action = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
+
+        if (action == "check")
+        {
+            try
+            {
+                using var probe = new SessionStore();
+                var sessions = probe.Sessions(1);
+                Console.WriteLine(probe.RecoveredFromCorruption
+                    ? $"Storico recuperato: il file danneggiato è in {probe.RecoveryBackupPath}"
+                    : $"Storico integro ({new FileInfo(probe.DatabasePath).Length / 1024.0:F0} KB)");
+                Console.WriteLine($"Sessioni leggibili: {sessions.Count}");
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(exception.ToString());
+                return 1;
+            }
+        }
+
         using var store = new SessionStore();
 
         switch (action)
@@ -585,13 +759,38 @@ internal static class Program
         var file = RequireFile(args);
         var spec = AsrModels.FromId(GetString(args, "--model", "small")!);
         var language = NormalizeLanguage(GetString(args, "--lang", "auto"));
+        var engineName = (GetString(args, "--engine", "whisper") ?? "whisper").ToLowerInvariant();
 
-        var modelPath = await EnsureAsrModelAsync(spec);
         var samples = WavFile.ReadMono16k(file);
         Console.WriteLine($"File    : {file} ({samples.Length / 16000.0:F1} s)");
-        Console.WriteLine($"Modello : {spec.Id}");
 
-        using var engine = new WhisperAsrEngine(modelPath, spec.Id);
+        IAsrEngine engine;
+        if (engineName == "vosk")
+        {
+            var directory = await VoskModels.EnsureAsync(language);
+            Console.WriteLine($"Modello : {VoskModels.ModelId(language)}");
+            engine = new VoskAsrEngine(directory);
+        }
+        else if (engineName is "nemo" or "nemotron")
+        {
+            var server = await NeMoSpeechHost.EnsureAsync(message => Console.WriteLine(message));
+            if (server is null)
+            {
+                Console.Error.WriteLine("NeMo-Speech non disponibile.");
+                return 1;
+            }
+
+            Console.WriteLine($"Modello : {NeMoModels.StreamingId}");
+            engine = new NeMoSpeechEngine(server, ownsServer: false);
+        }
+        else
+        {
+            var modelPath = await EnsureAsrModelAsync(spec);
+            Console.WriteLine($"Modello : {spec.Id}");
+            engine = new WhisperAsrEngine(modelPath, spec.Id);
+        }
+
+        using var _ = engine;
         var result = await engine.TranscribeAsync(samples, 16000, language);
 
         Console.WriteLine($"Tempo   : {result.Elapsed.TotalSeconds:F2} s (RTF {result.RealTimeFactor:F3})");
@@ -744,7 +943,11 @@ internal static class Program
         using var vad = new SileroVad(AppPaths.VadModelPath);
         using var segmenter = new SpeechSegmenter(vad);
         using var mixer = new AudioMixer();
-        using var engine = new WhisperAsrEngine(modelPath, spec.Id);
+        var engineName = (GetString(args, "--engine", "whisper") ?? "whisper").ToLowerInvariant();
+        using IAsrEngine engine = engineName == "vosk"
+            ? new VoskAsrEngine(await VoskModels.EnsureAsync(language))
+            : new WhisperAsrEngine(modelPath, spec.Id);
+        Console.WriteLine($"Parziali: {engine.Name}");
         using var finalEngine = ReferenceEquals(finalSpec, spec)
             ? null
             : new WhisperAsrEngine(finalModelPath, finalSpec.Id);
