@@ -17,6 +17,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private readonly Dictionary<int, int> _translationVersions = [];
     private readonly Dictionary<int, CancellationTokenSource> _pendingTranslations = [];
     private readonly object _cueGate = new();
+    private readonly SemaphoreSlim _translationGate = new(2, 2);
     private SessionStore? _history;
     private readonly bool _ownsHistory;
     private long _historySessionId;
@@ -28,6 +29,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private VoiceCapture? _microphoneCapture;
     private IAsrEngine? _partialEngine;
     private IAsrEngine? _finalEngine;
+    private NeMoSpeechServer? _realtimeServer;
+    private SpeakerTracker? _speakerTracker;
     private bool _ownsPartialEngine;
     private bool _ownsFinalEngine;
     private readonly List<VoiceCapture> _captures = [];
@@ -131,6 +134,26 @@ public sealed class TranscriptionSession : IAsyncDisposable
             .ConfigureAwait(false);
         _finalEngine = final.Engine;
         _ownsFinalEngine = final.Owned;
+
+        if (Options.LiveBackend == Hardware.AsrBackend.NeMoSpeech)
+        {
+            try
+            {
+                _realtimeServer = await NeMoSpeechHost
+                    .EnsureAsync(Report, diarizerPath, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                Report($"Streaming NeMo non disponibile ({exception.Message}): uso i parziali batch.");
+                _realtimeServer = null;
+            }
+
+            if (_realtimeServer is not null && diarizerPath is not null)
+            {
+                _speakerTracker = new SpeakerTracker(new NeMoDiarizationClient(_realtimeServer.Port));
+            }
+        }
 
         if (Options.ConversationMode && diarizerPath is null)
         {
@@ -320,17 +343,140 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private void AddLane(IPcmSource source, int speaker)
     {
         var segmenter = new SpeechSegmenter(new SileroVad(AppPaths.VadModelPath));
+        var streaming = _realtimeServer is null ? null : new NeMoRealtimeClient(_realtimeServer.Port);
         var lane = new Lane(
             _lanes.Count,
             speaker,
             segmenter,
-            new RealtimeTranscriber(source, segmenter, _partialEngine!, null, _finalEngine!)
+            new RealtimeTranscriber(source, segmenter, _partialEngine!, null, _finalEngine!, streaming)
             {
                 Language = Options.SourceLanguage,
             });
 
         lane.Transcriber.Update += update => OnTranscriptUpdate(lane, update);
+        if (!lane.SpeakerIsFixed && _speakerTracker is not null)
+        {
+            lane.Transcriber.AudioBlock += (block, _) => _speakerTracker?.Append(block);
+        }
+
+        lane.Transcriber.FinalResolved += (utterance, start, samples, result) =>
+            _ = ResolveSpeakersAsync(lane, utterance, start, samples, result);
         _lanes.Add(lane);
+    }
+
+    /// <summary>
+    /// La frase è già a schermo; qui si risolve solo chi l'ha detta. Se la diarizzazione
+    /// tarda o fallisce, il testo resta valido e senza etichetta.
+    /// </summary>
+    private async Task ResolveSpeakersAsync(
+        Lane lane,
+        int utterance,
+        TimeSpan utteranceStart,
+        float[] samples,
+        AsrResult result)
+    {
+        if (!Options.ConversationMode
+            || lane.SpeakerIsFixed
+            || _speakerTracker is null
+            || result.Segments.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var cueId = ResolveCueId(lane.Index, utterance);
+
+            var token = _cancellation?.Token ?? CancellationToken.None;
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(6);
+            IReadOnlyList<AsrSegment>? tagged = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (_speakerTracker.TryApply(result.Segments, utteranceStart, out tagged))
+                {
+                    break;
+                }
+
+                await Task.Delay(250, token).ConfigureAwait(false);
+            }
+
+            if (tagged is null)
+            {
+                return;
+            }
+
+            var turns = RealtimeTranscriber.BuildTurns(new AsrResult(
+                result.Text,
+                result.Language,
+                result.AudioDuration,
+                result.Elapsed,
+                tagged));
+            if (turns.Count == 0)
+            {
+                return;
+            }
+
+            if (turns.Count == 1)
+            {
+                UpdateSpeaker(cueId, turns[0].Speaker);
+                return;
+            }
+
+            for (var index = 0; index < turns.Count; index++)
+            {
+                var turn = turns[index];
+                var turnCueId = index == 0
+                    ? ResolveCueId(lane.Index, utterance)
+                    : NextCueId();
+                PublishCue(
+                    turnCueId,
+                    turn.Speaker,
+                    turn.Text,
+                    isFinal: true,
+                    turn.Start,
+                    turn.Duration,
+                    provisional: string.Empty,
+                    TimeSpan.Zero);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // sessione fermata
+        }
+        catch (Exception exception)
+        {
+            LastError = exception.Message;
+            StatusChanged?.Invoke($"Diarizzazione non riuscita: {exception.Message}");
+        }
+    }
+
+    /// <summary>Aggiorna solo l'etichetta del parlante: testo e posizione non si muovono.</summary>
+    private void UpdateSpeaker(int cueId, int speaker)
+    {
+        Cue updated;
+        lock (_cueGate)
+        {
+            if (!_cues.TryGetValue(cueId, out var cue))
+            {
+                return;
+            }
+
+            updated = cue with { Speaker = speaker };
+            _cues[cueId] = updated;
+        }
+
+        CueUpdated?.Invoke(updated);
+        if (_history is not null && _historySessionId > 0)
+        {
+            try
+            {
+                _history.SaveCue(_historySessionId, updated);
+            }
+            catch (Exception exception)
+            {
+                LastError = exception.Message;
+            }
+        }
     }
 
     private void OnTranscriptUpdate(Lane lane, TranscriptUpdate update)
@@ -492,9 +638,18 @@ public sealed class TranscriptionSession : IAsyncDisposable
                 await Task.Delay(ProgressiveTranslationDelay, cancellationToken).ConfigureAwait(false);
             }
 
-            var result = await _translationService!
-                .TranslateAsync(cue.Original, Options.SourceLanguage, Options.TargetLanguage, cancellationToken)
-                .ConfigureAwait(false);
+            await _translationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            TranslationResult result;
+            try
+            {
+                result = await _translationService!
+                    .TranslateAsync(cue.Original, Options.SourceLanguage, Options.TargetLanguage, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _translationGate.Release();
+            }
 
             Cue updated;
             lock (_cueGate)
@@ -657,6 +812,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
         Safe(() => _mixer?.Dispose());
         Safe(() => _translationService?.Dispose());
         Safe(() => _translationServer?.Dispose());
+        Safe(() => _speakerTracker?.Dispose());
+        Safe(() => _translationGate.Dispose());
         Safe(() => _cancellation?.Dispose());
 
         if (_history is not null && _historySessionId > 0)

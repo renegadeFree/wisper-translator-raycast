@@ -1134,6 +1134,73 @@ screen nel readme devono essere solo del programma senza lo schermo del pc o alt
 | D-32 | Screenshot **renderizzati** invece di copiati dallo schermo | È l'unico modo per garantire per costruzione che non finisca nell'immagine niente di privato; in più sono nitidi a 2x |
 | D-33 | Corallo `#FF7A59` per stop, testo provvisorio e correzioni | È il colore dei riferimenti forniti dall'utente e distingue a colpo d'occhio ciò che è ancora in movimento |
 
+---
+
+## 16. Lavorazione v2.2 — barra di vetro reale e conversazioni 3/4 voci (F29–F31)
+
+Richiesta dell'utente (2026-10-03): «la barra è molto brutta... è un disegno ovale dentro un
+rettangolo della finestra normale di Windows», forma e trasparenza dal riferimento fornito, barra
+mostrata solo su comando, verifica di tutte le funzionalità e prove con 3/4 persone che parlano.
+
+### F29 — Una sola forma, niente rettangolo acrilico (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F29.1 | **Regione finestra reale** (`SetWindowRgn` + `CreateRoundRectRgn`) applicata a ogni `WM_SIZE`, cambio DPI e ridimensionamento: l'HWND è ritagliato ad angoli arrotondati, quindi l'acrilico non può riempire il rettangolo attorno | ✅ |
+| F29.2 | `BarGeometry` con raggio fisso 20 px (non più altezza/2), riga da 86 px, viewport 2 righe, diametro regione calcolato in pixel device | ✅ |
+| F29.3 | XAML riscritto: un'unica superficie di vetro, bordo chiaro 1 px, luce interna, nessun titolo e nessun equalizzatore a barre; punto di stato pulsante | ✅ |
+| F29.4 | Contenuto: 2 frasi visibili, 5 in memoria, rotellina, originale su una riga e traduzione fino a due righe; aggiornamento **in place** per non far lampeggiare l'elenco | ✅ |
+| F29.5 | Comandi: pulsante primario corallo sempre visibile, 4 comandi rapidi e menu `⋯` per direzione, testo, discreta, overlay, pannello, impostazioni e chiusura | ✅ |
+| F29.6 | Barra **nascosta all'avvio** e mostrata su comando: pulsante nel pannello, tray e scorciatoia globale `Ctrl+Alt+B`; migrazione `SettingsVersion` per le installazioni esistenti | ✅ |
+| F29.7 | Autotest `--bar-selftest`: verifica `COMPLEXREGION` (regione non rettangolare). Esito reale: **PASS**, finestra 981x240, pannello 981x240, elenco 959x184 | ✅ |
+| F29.8 | Screenshot rigenerati con `--shot`: nessun pixel del desktop, nuova forma anche in `barra-ascolto.png`, `barra-riposo.png`, `pannello.png`, `impostazioni-barra.png`, `impostazioni-conversazione.png` | ✅ |
+| F29.9 | Test: **84 verdi** (83 precedenti + regione/geometria aggiornata) | ✅ |
+
+**Decisioni della v2.2 (barra):**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-34 | Rettangolo arrotondato ~20 px, **non capsula completa** | È la forma del riferimento fornito e regge bene le frasi lunghe su due righe |
+| D-35 | `StartWithBar=false` con migrazione una-tantum | La barra è un pannello su richiesta, non un elemento fisso che copre lo schermo |
+| D-36 | Il lampo corallo è un livello separato che sfuma, non il colore della riga | Evita che una frase consolidata resti colorata per sempre |
+| D-37 | Niente barre dell'equalizzatore: punto di stato pulsante | Il riferimento chiede stile e trasparenza, non grafici; il livello audio resta comunque visibile |
+
+### F30 — Streaming NeMo e diarizzazione stabile tra le battute (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F30.1 | Nuovo `NeMoRealtimeClient`: WebSocket verso `/v1/audio/transcriptions/realtime`, invio PCM16 a blocchi da ~100 ms con canale limitato (scarta il più vecchio), riconnessione e fallback automatico ai parziali batch | ✅ |
+| F30.2 | `RealtimeTranscriber` usa il WebSocket per il testo immediato e salta la decodifica batch dei parziali; VAD e corsia finale restano invariati | ✅ |
+| F30.3 | `NeMoSpeechEngine` non chiede più `diarization=true`: il testo finale torna subito con le parole e i tempi | ✅ |
+| F30.4 | Nuovo `SpeakerTracker` a finestra scorrevole (45 s, passo 5 s, solo con segnale): rianalizza l'audio con `/v1/audio/diarizations` e mantiene gli id globali per sovrapposizione temporale | ✅ |
+| F30.5 | `TranscriptionSession` aggiorna l'etichetta del parlante dopo il testo, in place, e divide la battuta ai cambi di voce senza riordinare la barra | ✅ |
+| F30.6 | Diarizzatore predefinito portato a **Sortformer 4 parlanti**: nei test separa le voci normali meglio di Nemotron; Nemotron resta selezionabile per riunioni fino a 8 voci | ✅ |
+| F30.7 | UI: aggiornamenti della barra coalescenti e aggiornamento in place; traduzione progressiva con al massimo 2 richieste concorrenti | ✅ |
+| F30.8 | Test su clip sintetica di 3 voci (52,9 s, 9 turni, pause 1,8 s): sequenza parlanti **1,2,3,1,2,3,1,2** senza inversioni; latenza finale mediana **0,43 s**, peggiore **0,76 s**; accuratezza ASR **90,6%**; stop app **90 ms** senza `0xc0000005` | ✅ |
+| F30.9 | Test 4 voci: le tre voci SAPI distinte restano separate; la quarta, ottenuta alzando il tono della prima, viene unita — è lo stesso timbro, quindi il test a 4 timbri reali resta da fare sul campo | ⚠️ limite dichiarato |
+| F30.10 | Test: **86 verdi** | ✅ |
+
+**Decisioni della v2.2 (prestazioni):**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-38 | Sortformer 4 parlanti come diarizzatore predefinito | I test reali mostrano sequenze stabili su 3 voci; per le call normali è più affidabile di Nemotron, che resta per riunioni affollate |
+| D-39 | Finestra del tracker a 45 s e passo 5 s, solo se c'è segnale | Mantiene le identità tra le battute senza saturare la CPU di una macchina media |
+| D-40 | La diarizzazione non blocca mai il testo: se non è pronta entro 6 s la battuta resta senza nome | La trascrizione e la traduzione sono il requisito primario; l'etichetta è un miglioramento progressivo |
+
+### F31 — Collaudo, installer e release v2.2.0 (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F31.1 | Suite completa | **86 test verdi**, 0 errori di compilazione, 0 avvisi |
+| F31.2 | Autotest regione barra sul sorgente e sul binario installato | **PASS** `COMPLEXREGION`, finestra 981x240, pannello 981x240, viewport 959x184 |
+| F31.3 | Avvio/stop del binario installato | stop in **36 ms**, stato `In pausa`, processo chiuso |
+| F31.4 | Registro eventi Windows | **0 crash `0xc0000005`** e 0 errori `ggml-cpu-whisper` nella finestra di collaudo |
+| F31.5 | Installer | `WisperTranslator-Setup-2.2.0.exe`, 89,8 MB, installazione silenziosa `exit 0` su cartella pulita, versione file **2.2.0.0** |
+| F31.6 | SHA-256 installer | `EBE4F55DF3A1AF52A3DEEA5AED33A846222751689F9579766F25F04024F1AD58` |
+| F31.7 | Documentazione | `README.md`, `docs/CONVERSAZIONE.md`, `docs/BENCHMARKS.md`, screenshot rigenerati; `PLAN.md` aggiornato |
+| F31.8 | Release | commit su `main`, tag e release **v2.2.0** con installer e note |
+
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.
 - **Enunciato**: porzione di audio compresa tra due silenzi, inviata all'ASR.

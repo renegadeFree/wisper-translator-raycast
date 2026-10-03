@@ -59,8 +59,11 @@ public static class NeMoModels
 
     public static void Delete() => ModelStore.Delete(Entry);
 
-    /// <summary>Diarizzatore predefinito: 8 parlanti, 107 MB, licenza OpenMDW-1.1.</summary>
-    public const string DiarizerDefaultId = "nemotron-3-diarization";
+    /// <summary>
+    /// Predefinito per le call normali: Sortformer 4 parlanti. Nei test reali separa le voci
+    /// meglio di Nemotron; per riunioni oltre 4 voci resta selezionabile Nemotron (8 parlanti).
+    /// </summary>
+    public const string DiarizerDefaultId = "diar-streaming-sortformer-4spk-v2";
 
     public static IReadOnlyList<ModelCatalogEntry> Diarizers { get; } =
         [ModelCatalog.NemotronDiarization, ModelCatalog.SortformerDiarization];
@@ -68,7 +71,7 @@ public static class NeMoModels
     /// <summary>La voce di catalogo del diarizzatore scelto (il predefinito se l'id è ignoto).</summary>
     public static ModelCatalogEntry DiarizerEntry(string? id) =>
         Diarizers.FirstOrDefault(entry => string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase))
-        ?? ModelCatalog.NemotronDiarization;
+        ?? ModelCatalog.SortformerDiarization;
 
     public static bool IsDiarizerInstalled(string? id) => ModelStore.IsInstalled(DiarizerEntry(id));
 

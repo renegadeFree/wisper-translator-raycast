@@ -8,6 +8,9 @@ namespace WisperTranslator.Core.Settings;
 /// <summary>Preferenze dell'utente, salvate in JSON dentro la cartella dell'applicazione.</summary>
 public sealed class AppSettings
 {
+    /// <summary>Versione del file: serve solo alle migrazioni una-tantum.</summary>
+    public int SettingsVersion { get; set; }
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
@@ -91,13 +94,13 @@ public sealed class AppSettings
     // --- Barra fluttuante ---
 
     /// <summary>Cosa si apre all'avvio: barra fluttuante o pannello esteso.</summary>
-    public bool StartWithBar { get; set; } = true;
+    public bool StartWithBar { get; set; }
 
     public double? BarLeft { get; set; }
 
     public double? BarTop { get; set; }
 
-    /// <summary>Frasi visibili nella barra (1–3): le altre restano sotto, raggiungibili con la rotellina.</summary>
+    /// <summary>Frasi visibili nella barra (1–2): le altre restano sotto, raggiungibili con la rotellina.</summary>
     public int BarRows { get; set; } = 2;
 
     /// <summary>Larghezza della capsula in pixel: una frase lunga deve starci senza essere tagliata.</summary>
@@ -150,6 +153,7 @@ public sealed class AppSettings
                 var loaded = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions);
                 if (loaded is not null)
                 {
+                    loaded.Migrate();
                     return loaded;
                 }
             }
@@ -163,6 +167,36 @@ public sealed class AppSettings
         var settings = new AppSettings();
         (settings.PartialModelId, settings.FinalModelId) = Hardware.HardwareDetector.Detect().RecommendedModels;
         return settings;
+    }
+
+    /// <summary>
+    /// Le versioni precedenti aprivano la barra all'avvio. Dalla 2.2 la barra è un pannello
+    /// su richiesta: la migrazione spegne quella tendenza una sola volta, senza impedire di
+    /// riattivarla nelle impostazioni.
+    /// </summary>
+    private void Migrate()
+    {
+        if (SettingsVersion >= 4)
+        {
+            return;
+        }
+
+        if (SettingsVersion < 3)
+        {
+            StartWithBar = false;
+        }
+
+        // Il vecchio predefinito (Nemotron) resta selezionabile, ma per le call normali
+        // Sortformer separa meglio le voci: si migra solo il valore rimasto al default.
+        if (string.Equals(DiarizerModelId, "nemotron-3-diarization", StringComparison.OrdinalIgnoreCase))
+        {
+            DiarizerModelId = Asr.NeMoModels.DiarizerDefaultId;
+        }
+
+        BarRows = Math.Clamp(BarRows, 1, BarGeometry.MaxRows);
+        BarBuffer = Math.Clamp(BarBuffer, 3, 8);
+        SettingsVersion = 4;
+        Save();
     }
 
     public void Save()

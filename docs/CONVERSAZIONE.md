@@ -8,14 +8,16 @@ conversazione lo fa restando in locale.
 
 1. **Il microfono è "Tu".** La tua voce non ha bisogno di essere riconosciuta: è la tua. Le sue frasi
    arrivano nella corsia etichettata *Tu*.
-2. **L'audio di sistema viene diarizzato.** Ogni frase conclusa degli altri partecipanti passa dal
-   diarizzatore, che restituisce il parlante di ogni parola. Le parole consecutive dello stesso
-   parlante diventano un turno.
+2. **L'audio di sistema viene diarizzato a finestra scorrevole.** Il programma tiene gli ultimi
+   45 secondi di audio, li rianalizza ogni 5 secondi mentre c'è segnale e riusa gli id dei parlanti
+   sovrapposti nel tempo. Così `Speaker 2` resta la stessa persona anche nella battuta successiva,
+   cosa che una diarizzazione frase-per-frase non può garantire.
 3. **Se in una frase si sentono due voci, la frase si spezza.** La riga in corso diventa il primo
    turno, le altre si accodano: l'elenco non "salta" e non si perde nulla.
-4. **Il testo immediato resta veloce.** La diarizzazione gira solo sulle frasi definitive, quindi i
-   parziali hanno la stessa latenza di prima e i nomi compaiono quando la frase si chiude.
-5. **Le etichette sono anonime**: `Speaker 1`, `Speaker 2`, … fino a `Speaker 8`, ognuna con il suo
+4. **Il testo immediato resta veloce.** I parziali arrivano dal WebSocket NeMo; il testo definitivo
+   viene pubblicato subito e l'etichetta del parlante si aggiorna dopo, senza bloccare la battuta.
+5. **Le etichette sono anonime**: `Speaker 1`, `Speaker 2`, … fino a `Speaker 4` con Sortformer
+   (fino a `Speaker 8` con Nemotron), ognuna con il suo
    colore. Nessun profilo vocale viene salvato: riconoscere una voce già nominata in una sessione
    diversa richiederebbe un modello biometrico in più, che abbiamo scelto di non usare.
 
@@ -23,8 +25,8 @@ conversazione lo fa restando in locale.
 
 | Componente | Dimensione | Licenza | Note |
 |---|---|---|---|
-| **Nemotron 3 Diarization** (q8_0) | 107 MB | OpenMDW-1.1 | predefinito, fino a 8 parlanti |
-| Sortformer 4 parlanti v2 (q8_0) | 147 MB | CC-BY-4.0 | alternativa, massimo 4 parlanti |
+| **Sortformer 4 parlanti v2** (q8_0) | 147 MB | CC-BY-4.0 | predefinito per le call normali |
+| Nemotron 3 Diarization (q8_0) | 107 MB | OpenMDW-1.1 | alternativa, fino a 8 parlanti |
 | Runtime NeMo-Speech.cpp | 5,5 MB | Apache-2.0 | processo locale già usato da Nemotron 3.5 |
 | Nemotron 3.5 ASR Streaming (q8_0) | 708 MB | OpenMDW-1.1 | serve come motore definitivo |
 
@@ -44,23 +46,26 @@ questi componenti il programma continua a trascrivere: semplicemente non aggiung
 
 ## Cosa aspettarsi (misurato, non stimato)
 
-Su una macchina con Ryzen 9 7900X3D, 63 GB di RAM e RTX 3080 Ti, sessione reale con diarizzazione
-attiva su audio di sistema e microfono:
+Su una macchina con Ryzen 9 7900X3D, 24 thread e 63 GB di RAM, clip sintetica con 3 voci SAPI
+distinte (52,9 s, 9 turni, pause di 1,8 s), audio di sistema con loopback e Sortformer:
 
 | Fase | Tempo |
 |---|---|
-| Testo immediato (parziali) | 73–600 ms |
-| Frase definitiva con diarizzazione | 82–1560 ms (tipico 700–900 ms) |
-| Fermata della sessione | 101 ms |
-| RAM aggiuntiva del diarizzatore | ~150 MB |
+| Testo immediato (WebSocket) | 0,00 s per parola (arriva mentre il server decodifica) |
+| Frase definitiva | mediana 0,43 s, peggiore 0,76 s |
+| Diarizzazione su file intero (52,9 s) | 1,22 s (RTF 0,023) |
+| Fermata della sessione | 90 ms |
+| Accuratezza ASR sulla clip | 90,6% |
+| Sequenza parlanti | 1,2,3,1,2,3,1,2 — stabile, senza inversioni |
 
 ## Limiti dichiarati
 
 - **Voci sovrapposte**: se due persone parlano insieme, il turno più probabile è uno solo e l'altro
   testo può finire sotto il parlante sbagliato.
-- **Timbri simili**: nei test con voci sintetiche dello stesso sesso il diarizzatore le ha in parte
-  unite. Con voci reali e distinte va molto meglio; la verifica valida è una call vera.
-- **Massimo 8 parlanti** per sessione (limite del modello).
+- **Timbri simili**: nei test la quarta voce era la prima con il tono alzato; essendo lo stesso
+  timbro, Sortformer l'ha unita alla prima. Le tre voci distinte sono invece rimaste separate.
+  La verifica valida per 4 timbri reali è una call vera.
+- **Massimo 4 parlanti** con Sortformer, 8 con Nemotron (limite del modello scelto).
 - **Nomi non ricordati**: ogni sessione riparte da `Speaker 1`. Non esiste una rubrica di voci.
 - **Microfono + casse**: se lasci acceso il microfono mentre l'audio esce dagli altoparlanti, la
   stessa frase può comparire due volte (una come *Tu*, una come *Speaker N*). Con le cuffie non
@@ -72,11 +77,13 @@ attiva su audio di sistema e microfono:
 
 ```powershell
 # una clip con due voci alternate (usa le voci installate in Windows)
-wisper tts --lang en --voices "Microsoft Zira Desktop,Microsoft Hazel Desktop" --lines 4 `
-  --pause 500 --out "$env:LOCALAPPDATA\WisperTranslator\test-clips\dialogo.wav"
+wisper tts --lang en --lines 9 --pause 1800 `
+  --voices "Microsoft Zira Desktop,Microsoft Hazel Desktop,Microsoft Elsa Desktop" `
+  --out "$env:LOCALAPPDATA\WisperTranslator\test-clips\dialogo.wav"
 
 # il percorso completo della modalità conversazione, senza aprire l'interfaccia
-wisper diarize "$env:LOCALAPPDATA\WisperTranslator\test-clips\dialogo.wav" --lang en
+wisper diarize "$env:LOCALAPPDATA\WisperTranslator\test-clips\dialogo.wav" --lang en `
+  --diarizer diar-streaming-sortformer-4spk-v2
 ```
 
 `wisper diarize` avvia lo stesso server, fa la stessa richiesta dell'engine finale e stampa i turni

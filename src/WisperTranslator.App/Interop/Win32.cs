@@ -36,7 +36,78 @@ internal static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateRoundRectRgn(
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int ellipseWidth,
+        int ellipseHeight);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(IntPtr handle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowRgn(IntPtr hWnd, IntPtr region, bool redraw);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowRgn(IntPtr hWnd, IntPtr region);
+
     public static IntPtr Handle(Window window) => new WindowInteropHelper(window).Handle;
+
+    /// <summary>
+    /// Ritaglia davvero l'HWND ad angoli arrotondati: è ciò che impedisce ai pixel acrilici
+    /// di riempire il rettangolo attorno alla capsula.
+    /// </summary>
+    public static bool ApplyRoundedRegion(Window window, int widthPixels, int heightPixels, int diameterPixels)
+    {
+        var handle = Handle(window);
+        if (handle == IntPtr.Zero || widthPixels < 2 || heightPixels < 2)
+        {
+            return false;
+        }
+
+        var region = CreateRoundRectRgn(0, 0, widthPixels + 1, heightPixels + 1, diameterPixels, diameterPixels);
+        if (region == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        // SetWindowRgn prende possesso della regione: non va cancellata qui.
+        if (SetWindowRgn(handle, region, true) == 0)
+        {
+            DeleteObject(region);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Tipo di regione corrente: 3 = COMPLEXREGION, cioè non è un semplice rettangolo.</summary>
+    public static int WindowRegionType(Window window)
+    {
+        var handle = Handle(window);
+        if (handle == IntPtr.Zero)
+        {
+            return 0;
+        }
+
+        var probe = CreateRoundRectRgn(0, 0, 1, 1, 2, 2);
+        if (probe == IntPtr.Zero)
+        {
+            return 0;
+        }
+
+        try
+        {
+            return GetWindowRgn(handle, probe);
+        }
+        finally
+        {
+            DeleteObject(probe);
+        }
+    }
 
     /// <summary>Rende la finestra trasparente ai click e, se richiesto, invisibile alle registrazioni.</summary>
     public static void MakeOverlay(Window window, bool hideFromCapture = true)

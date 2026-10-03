@@ -14,16 +14,25 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 > Le immagini sono generate dal programma stesso (`WisperTranslator.App.exe --shot`) su frasi
 > d'esempio: non contengono lo schermo del PC né dati di nessuno.
 
-## Novità della versione 2.1
+## Novità della versione 2.2
 
-- **Barra ridisegnata in stile Apple**: capsula completamente arrotondata, **equalizzatore animato**
-  che segue l'audio reale, **pulsante di stop corallo** sempre a portata, pulsanti circolari incassati
-  che compaiono al passaggio del mouse, animazioni con effetto molla.
-- **Più larga, per frasi intere**: 1000 px di default (480–1600 dallo slider o trascinando i bordi),
-  ogni frase va a capo **fino a due righe** e non viene più troncata. Restano 2 frasi visibili su 5
-  in memoria, con la rotellina per le altre.
-- **Parlante come badge colorato** prima del testo (come nei riferimenti), testo provvisorio e
-  correzioni **evidenziati in corallo** invece che in grigio.
+- **Barra rifatta da zero**: non è più un ovale disegnato dentro il rettangolo acrilico di Windows.
+  La finestra viene ritagliata ad angoli arrotondati reali (`SetWindowRgn`), quindi è **un unico
+  pannello di vetro** con bordo chiaro, nessuna cornice classica e nessun secondo rettangolo sotto.
+- **Su richiesta**: la barra resta nascosta all'avvio e compare con il pulsante **Barra** nel
+  pannello, dalla tray o con `Ctrl+Alt+B`; resta finché non la nascondi. 2 frasi visibili, 5 in
+  memoria, le altre con la rotellina.
+- **Testo più leggibile**: originale su una riga e traduzione fino a due righe, senza troncamenti
+  prematuri; badge del parlante colorato, pulsante corallo sempre visibile, 4 comandi rapidi e menu
+  `⋯` per gli altri. Niente titolo né grafici: il livello audio è un punto di stato che pulsa.
+- **Conversazione più reale**: il testo immediato passa dal **WebSocket NeMo** (parziali mentre il
+  server decodifica, non a richieste ripetute), il testo definitivo non aspetta più la
+  diarizzazione, e un **tracker a finestra scorrevole** mantiene le stesse etichette di parlante tra
+  le battute. Sortformer 4 parlanti è il diarizzatore predefinito; Nemotron resta per le riunioni
+  fino a 8 voci.
+- **Numeri misurati**: su 3 voci sintetiche distinte, 9 turni con sequenza stabile
+  `1,2,3,1,2,3,1,2`, finali a **0,43 s** di mediana e **0,76 s** nel caso peggiore, accuratezza ASR
+  **90,6%**. Dettagli in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 - **Screenshot senza desktop**: il comando `--shot` disegna solo le finestre dell'app su uno sfondo
   neutro, quindi nelle immagini del README non finisce niente dello schermo.
 
@@ -42,8 +51,9 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 - **Parlanti in tutto il programma**: etichetta nella barra e nel pannello, dettaglio sessione,
   esportazione **SRT** con `<v Speaker 1>`, JSON con il campo `speaker`, e nuova sezione PDF
   **Partecipanti rilevati** con battute, tempo di parola e quota di ciascuno.
-- **Nuovi modelli in catalogo**: **Nemotron 3 Diarization** (107 MB, fino a 8 parlanti,
-  OpenMDW-1.1) come predefinito e **Sortformer 4 parlanti v2** (147 MB, CC-BY-4.0) come alternativa.
+- **Nuovi modelli in catalogo**: **Sortformer 4 parlanti v2** (147 MB, CC-BY-4.0) come predefinito
+  per le call normali e **Nemotron 3 Diarization** (107 MB, fino a 8 parlanti, OpenMDW-1.1) per le
+  riunioni affollate.
 - **Nuove schede nelle impostazioni**: **Conversazione** (diarizzatore, download, verifica, limiti
   dichiarati) e **Barra** (frasi visibili, frasi in memoria, testo mostrato, discreta, animazioni).
 
@@ -70,12 +80,13 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 - Cattura l'**audio di sistema** (loopback WASAPI) e/o il **microfono**, con accensione indipendente.
 - Trascrive in locale con Whisper (`whisper.cpp`): nessun audio lascia il PC.
 - Traduce in locale con i modelli Firefox/Bergamot: circa **25 ms per frase**, nessuna chiave API.
-- Mostra le battute in una **barra fluttuante acrilica** (nuova in alto, le vecchie scendono, le
-  frasi oltre quelle visibili si raggiungono con la rotellina), nel **pannello esteso** e in un
-  **overlay a schermo intero**, trasparente e cliccabile-attraverso.
-- Nella **modalità conversazione** distingue chi parla: *Tu* per il microfono, `Speaker 1…8` per
-  l'audio di sistema, anche in esportazione e nei report.
-- Salva lo storico delle sessioni con **retention di 5 giorni** ed esporta in **SRT**, testo o JSON.
+- Mostra le battute in una **barra di vetro fluttuante** su richiesta (nuova in alto, le vecchie
+  scendono, le frasi oltre quelle visibili si raggiungono con la rotellina), nel **pannello esteso**
+  e in un **overlay a schermo intero**, trasparente e cliccabile-attraverso.
+- Nella **modalità conversazione** distingue chi parla: *Tu* per il microfono, `Speaker 1…4` con
+  Sortformer (fino a 8 con Nemotron) per l'audio di sistema, anche in esportazione e nei report.
+- Salva lo storico delle sessioni con **retention configurabile** (0 = per sempre) ed esporta in
+  **SRT**, testo o JSON.
 - Gestisce i modelli: download con verifica SHA-256, ripresa, verifica integrità, import locale,
   eliminazione.
 
@@ -83,7 +94,8 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 
 - Windows 10/11 a 64 bit.
 - 4 GB di RAM liberi (i modelli piccoli girano anche su CPU senza GPU dedicata).
-- ~700 MB di disco per il programma e ~250 MB per i modelli.
+- ~700 MB di disco per il programma; ~250 MB per i modelli piccoli, ~1,1 GB se usi Nemotron +
+  Sortformer.
 - Connessione a internet **solo** per il primo download dei modelli.
 
 ## Installazione
@@ -107,6 +119,7 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 | **Traduci** | spento: trascrive soltanto, senza tradurre |
 | **IT → EN / EN → IT** | direzione della traduzione (deve corrispondere alla lingua parlata) |
 | **Avvia / Ferma** | apre le sorgenti audio e comincia l'ascolto |
+| **Barra** | mostra o nasconde il pannello di vetro (anche `Ctrl+Alt+B`) |
 | **Overlay** | mostra i sottotitoli a tutto schermo |
 | **Impostazioni** | aspetto, modelli, dispositivi e storico |
 
@@ -119,13 +132,13 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 | `Ctrl+Alt+N` | microfono on/off |
 | `Ctrl+Alt+L` | inverti la direzione |
 | `Ctrl+Alt+O` | overlay on/off |
+| `Ctrl+Alt+B` | mostra/nascondi la barra di vetro |
 
-Nella **barra fluttuante** gli stessi comandi sono sui pulsanti che compaiono passando il mouse:
-il pulsante **corallo a destra** avvia e ferma ed è sempre visibile; gli altri (sistema, microfono,
-inverti direzione, testo mostrato, conversazione, traduci, modalità discreta, overlay, apri il
-pannello, impostazioni, chiudi nella barra delle applicazioni) compaiono alla sua sinistra. Il testo
-si trascina da qualsiasi punto della barra, che si allarga e si restringe **trascinando i bordi
-laterali**.
+Nella **barra di vetro** il pulsante **corallo a destra** avvia e ferma ed è sempre visibile; al
+passaggio del mouse compaiono i comandi rapidi (sistema, microfono, traduci, conversazione) e il
+menu `⋯` con direzione, testo mostrato, modalità discreta, overlay, pannello, impostazioni e
+chiusura. Il testo si trascina da qualsiasi punto della barra, che si allarga e si restringe
+**trascinando i bordi laterali**.
 
 ### Dove stanno i dati
 
@@ -164,7 +177,7 @@ l'eventuale motore cloud opzionale usano la rete, e il motore cloud è spento di
 
 ```powershell
 dotnet build                                  # compila
-dotnet test                                   # 78 test
+dotnet test                                   # 86 test
 dotnet run --project src/WisperTranslator.Cli -- hardware
 dotnet run --project src/WisperTranslator.Cli -- capture --seconds 15 --dump
 dotnet run --project src/WisperTranslator.Cli -- live --seconds 20 --model base --lang it
@@ -172,6 +185,7 @@ dotnet run --project src/WisperTranslator.Cli -- translate --bench
 dotnet run --project src/WisperTranslator.Cli -- models list
 dotnet run --project src/WisperTranslator.Cli -- history list
 dotnet run --project src/WisperTranslator.Cli -- diarize clip.wav --lang en
+dotnet run --project src/WisperTranslator.Cli -- live --engine nemo --final-engine nemo --diarize --source system --play-clip clip.wav --seconds 60 --lang en
 ```
 
 Per rigenerare le immagini del README (solo finestre dell'app, su sfondo neutro, con frasi

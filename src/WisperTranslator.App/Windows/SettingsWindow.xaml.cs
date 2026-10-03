@@ -162,7 +162,7 @@ public partial class SettingsWindow : FluentWindow
         BarEnabledCheck.IsChecked = _settings.StartWithBar;
         BarAnimationsCheck.IsChecked = _settings.BarAnimations;
         BarDiscreetCheck.IsChecked = _settings.BarDiscreet;
-        BarRowsRow.Value = _settings.BarRows;
+        BarRowsRow.Value = Math.Clamp(_settings.BarRows, 1, Core.Settings.BarGeometry.MaxRows);
         BarWidthRow.Value = Core.Settings.BarGeometry.ClampWidth(_settings.BarWidth);
         BarBufferRow.Value = _settings.BarBuffer;
 
@@ -181,7 +181,7 @@ public partial class SettingsWindow : FluentWindow
         _settings.StartWithBar = BarEnabledCheck.IsChecked == true;
         _settings.BarAnimations = BarAnimationsCheck.IsChecked == true;
         _settings.BarDiscreet = BarDiscreetCheck.IsChecked == true;
-        _settings.BarRows = (int)Math.Round(BarRowsRow.Value);
+        _settings.BarRows = Math.Clamp((int)Math.Round(BarRowsRow.Value), 1, Core.Settings.BarGeometry.MaxRows);
         _settings.BarWidth = Core.Settings.BarGeometry.ClampWidth(BarWidthRow.Value);
         _settings.BarBuffer = Math.Max((int)Math.Round(BarBufferRow.Value), _settings.BarRows);
         _settings.BarText = (BarTextMode)Math.Clamp(BarTextBox.SelectedIndex, 0, 2);
@@ -193,9 +193,9 @@ public partial class SettingsWindow : FluentWindow
     private void RefreshBarPreview()
     {
         BarPreviewText.Text =
-            $"La barra è larga {_settings.BarWidth:F0} px e mostra {_settings.BarRows} frasi da due righe "
-            + $"per volta, su {_settings.BarBuffer} in memoria: "
-            + $"le altre {Math.Max(0, _settings.BarBuffer - _settings.BarRows)} restano sotto, raggiungibili con la rotellina."
+            $"La barra è larga {_settings.BarWidth:F0} px e mostra {_settings.BarRows} frasi per volta, "
+            + $"su {_settings.BarBuffer} in memoria: le altre {Math.Max(0, _settings.BarBuffer - _settings.BarRows)} "
+            + "restano sotto, raggiungibili con la rotellina. Si mostra con Ctrl+Alt+B."
             + (_settings.BarDiscreet ? " Modalità discreta attiva." : string.Empty);
     }
 

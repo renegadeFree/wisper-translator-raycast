@@ -111,7 +111,11 @@ internal static class Program
               live [opzioni]               pipeline real-time completa (VAD + parziali + finali)
                   --seconds N              durata dell'ascolto (default 20)
                   --model, --lang          come sopra
-                  --final-model <id>       modello per le frasi finali (default: uguale a --model)
+                  --engine nemo|vosk|whisper   motore dei parziali (default whisper)
+                  --final-engine nemo|vosk|whisper  motore delle frasi finali
+                  --final-model <id>       modello Whisper per le frasi finali
+                  --diarize                diarizzazione NeMo sulle frasi finali
+                  --diarizer <id>          diarizzatore (default nemotron-3-diarization)
                   --source system|mic|both sorgenti (default system)
                   --play-clip <file.wav>   riproduce una clip per provare il loopback
                   --play                   riproduce il segnale sintetico
@@ -755,6 +759,26 @@ internal static class Program
         }
 
         File.WriteAllText(Path.ChangeExtension(output, ".txt"), text);
+        if (voices.Length > 0 && lines > 0)
+        {
+            var pool = language.StartsWith("en", StringComparison.Ordinal)
+                ? TranslationSamples.English
+                : TranslationSamples.Italian;
+            var expected = pool.Take(Math.Min(lines, pool.Count))
+                .Select((sentence, index) => new
+                {
+                    line = index + 1,
+                    speaker = (index % voices.Length) + 1,
+                    voice = voices[index % voices.Length],
+                    text = sentence,
+                })
+                .ToList();
+            File.WriteAllText(
+                Path.ChangeExtension(output, ".speakers.json"),
+                System.Text.Json.JsonSerializer.Serialize(
+                    expected,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
 
         var samples = WavFile.ReadMono16k(output);
         Console.WriteLine($"Clip creata: {output}");
@@ -797,8 +821,19 @@ internal static class Program
             using var engine = new NeMoSpeechEngine(server, ownsServer: false, diarize: true);
             Console.WriteLine($"File    : {file} ({samples.Length / 16000.0:F1} s)");
             var result = await engine.TranscribeAsync(samples, 16000, language, true);
-            Console.WriteLine($"Motore  : {engine.Name} · {result.Elapsed.TotalMilliseconds:F0} ms");
             Console.WriteLine($"Testo   : {result.Text}");
+            Console.WriteLine($"ASR     : {result.Elapsed.TotalMilliseconds:F0} ms");
+
+            using var diarization = new NeMoDiarizationClient(server.Port);
+            var diarizationWatch = Stopwatch.StartNew();
+            var segments = await diarization.DiarizeAsync(samples, 16000);
+            diarizationWatch.Stop();
+            Console.WriteLine($"Diariz. : {diarizationWatch.ElapsedMilliseconds:F0} ms · {segments.Count} segmenti");
+
+            result = result with
+            {
+                Segments = NeMoDiarizationClient.ApplySpeakers(result.Segments, segments),
+            };
 
             var turns = RealtimeTranscriber.BuildTurns(result);
             Console.WriteLine($"Turni   : {turns.Count}");
@@ -1007,17 +1042,87 @@ internal static class Program
         using var segmenter = new SpeechSegmenter(vad);
         using var mixer = new AudioMixer();
         var engineName = (GetString(args, "--engine", "whisper") ?? "whisper").ToLowerInvariant();
-        using IAsrEngine engine = engineName == "vosk"
-            ? new VoskAsrEngine(await VoskModels.EnsureAsync(language))
-            : new WhisperAsrEngine(modelPath, spec.Id);
+        var finalEngineName = (GetString(args, "--final-engine", engineName) ?? engineName).ToLowerInvariant();
+        var diarize = Has(args, "--diarize");
+        var diarizerId = GetString(args, "--diarizer", NeMoModels.DiarizerDefaultId);
+        NeMoSpeechServer? nemo = null;
+        string? diarizerPath = null;
+        if (engineName is "nemo" or "nemotron" || finalEngineName is "nemo" or "nemotron")
+        {
+            if (diarize)
+            {
+                diarizerPath = await NeMoModels.EnsureDiarizerAsync(
+                    diarizerId,
+                    new Progress<long>(done => Console.Write($"\r  diarizzatore {done / (1024.0 * 1024):F0} MB")));
+                Console.WriteLine();
+            }
+
+            nemo = await NeMoSpeechHost.EnsureAsync(Console.WriteLine, diarizerPath);
+            if (nemo is null)
+            {
+                Console.Error.WriteLine("NeMo-Speech non disponibile.");
+                return 1;
+            }
+        }
+
+        using IAsrEngine engine = engineName switch
+        {
+            "vosk" => new VoskAsrEngine(await VoskModels.EnsureAsync(language)),
+            "nemo" or "nemotron" => new NeMoSpeechEngine(nemo!, ownsServer: false),
+            _ => new WhisperAsrEngine(modelPath, spec.Id),
+        };
         Console.WriteLine($"Parziali: {engine.Name}");
-        using var finalEngine = ReferenceEquals(finalSpec, spec)
-            ? null
-            : new WhisperAsrEngine(finalModelPath, finalSpec.Id);
-        using var transcriber = new RealtimeTranscriber(mixer, segmenter, engine, null, finalEngine)
+        using IAsrEngine? finalEngine = finalEngineName switch
+        {
+            "nemo" or "nemotron" => new NeMoSpeechEngine(nemo!, ownsServer: false, diarize: diarize),
+            "vosk" => new VoskAsrEngine(await VoskModels.EnsureAsync(language)),
+            _ when !ReferenceEquals(finalSpec, spec) => new WhisperAsrEngine(finalModelPath, finalSpec.Id),
+            _ => null,
+        };
+        await using var streaming = engineName is "nemo" or "nemotron" && nemo is not null
+            ? new NeMoRealtimeClient(nemo.Port)
+            : null;
+        using var transcriber = new RealtimeTranscriber(mixer, segmenter, engine, null, finalEngine, streaming)
         {
             Language = language,
         };
+        using SpeakerTracker? liveTracker = diarize && nemo is not null
+            ? new SpeakerTracker(new NeMoDiarizationClient(nemo.Port))
+            : null;
+        var diarizationTasks = new List<Task>();
+        if (liveTracker is not null)
+        {
+            transcriber.AudioBlock += (block, _) => liveTracker.Append(block);
+            transcriber.FinalResolved += (_, start, __, result) =>
+            {
+                diarizationTasks.Add(Task.Run(async () =>
+                {
+                    IReadOnlyList<AsrSegment>? tagged = null;
+                    var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(6);
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        if (liveTracker.TryApply(result.Segments, start, out tagged))
+                        {
+                            break;
+                        }
+
+                        await Task.Delay(250);
+                    }
+
+                    if (tagged is null)
+                    {
+                        return;
+                    }
+
+                    var turns = RealtimeTranscriber.BuildTurns(result with { Segments = tagged });
+                    foreach (var turn in turns)
+                    {
+                        Console.WriteLine(
+                            $"  turno   [{turn.Start.TotalSeconds,6:F2}s] {Speakers.Label(turn.Speaker, "Partecipanti")}: {turn.Text}");
+                    }
+                }));
+            };
+        }
 
         var captures = new List<VoiceCapture>();
         if (system)
@@ -1085,6 +1190,12 @@ internal static class Program
         }
 
         await transcriber.RunAsync(cancellation.Token);
+        await Task.Delay(1500);
+        if (diarizationTasks.Count > 0)
+        {
+            await Task.WhenAll(diarizationTasks);
+        }
+
         playback?.Dispose();
 
         Console.WriteLine();

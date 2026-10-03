@@ -130,6 +130,13 @@
                     Margin="6,0,0,0"
                     Click="OnOverlayClicked"
                     ToolTip="Finestra overlay a schermo intero" />
+            <ToggleButton x:Name="BarToggle"
+                          Content="Barra"
+                          Padding="10,5"
+                          Margin="6,0,0,0"
+                          Checked="OnBarToggleChanged"
+                          Unchecked="OnBarToggleChanged"
+                          ToolTip="Mostra o nascondi il pannello di vetro (Ctrl+Alt+B)" />
             <Button x:Name="SettingsButton"
                     Content="Impostazioni"
                     Padding="10,5"

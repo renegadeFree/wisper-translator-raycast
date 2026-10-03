@@ -51,9 +51,9 @@ public sealed class NeMoSpeechEngine : IAsrEngine
 
         if (_diarize)
         {
-            // verbose_json è obbligatorio per avere words[].speaker dal diarizzatore.
+            // Le parole con i tempi servono ad allineare il diarizzatore in un secondo momento.
+            // La diarizzazione non si chiede qui: aspettarla rallenterebbe il testo definitivo.
             content.Add(new StringContent("verbose_json"), "response_format");
-            content.Add(new StringContent("true"), "diarization");
         }
 
         using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
@@ -73,7 +73,37 @@ public sealed class NeMoSpeechEngine : IAsrEngine
             language,
             audioDuration,
             watch.Elapsed,
-            GroupBySpeaker(payload?.Words));
+            _diarize ? Words(payload?.Words) : GroupBySpeaker(payload?.Words));
+    }
+
+    /// <summary>
+    /// Parole singole con i tempi: sono la base per attribuire in seguito il parlante senza
+    /// rifare la trascrizione.
+    /// </summary>
+    internal static IReadOnlyList<AsrSegment> Words(List<TranscriptionWord>? words)
+    {
+        if (words is null || words.Count == 0)
+        {
+            return [];
+        }
+
+        var segments = new List<AsrSegment>();
+        foreach (var word in words)
+        {
+            var text = word.Word?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            segments.Add(new AsrSegment(
+                text,
+                TimeSpan.FromSeconds(Math.Max(0, word.Start)),
+                TimeSpan.FromSeconds(Math.Max(0, word.End - word.Start)),
+                0));
+        }
+
+        return segments;
     }
 
     /// <summary>
@@ -117,7 +147,7 @@ public sealed class NeMoSpeechEngine : IAsrEngine
     }
 
     /// <summary>WAV PCM16 mono in memoria: è il formato che il server accetta senza conversioni.</summary>
-    private static byte[] ToWav(float[] samples, int sampleRate)
+    internal static byte[] ToWav(float[] samples, int sampleRate)
     {
         var dataLength = samples.Length * 2;
         var buffer = new byte[44 + dataLength];

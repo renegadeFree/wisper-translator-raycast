@@ -24,6 +24,7 @@ public partial class MainWindow : FluentWindow
     private const int HotkeyMicrophone = 3;
     private const int HotkeySwap = 4;
     private const int HotkeyOverlay = 5;
+    private const int HotkeyBar = 6;
     private const int WmHotkey = 0x0312;
 
     private readonly AppSettings _settings = AppSettings.Load();
@@ -36,6 +37,7 @@ public partial class MainWindow : FluentWindow
     private HwndSource? _source;
     private DispatcherTimer? _historyTimer;
     private DispatcherTimer? _levelTimer;
+    private readonly DispatcherTimer _barRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(66) };
     private bool _starting;
     private bool _exiting;
     private bool _shotMode;
@@ -58,6 +60,12 @@ public partial class MainWindow : FluentWindow
 
         RestorePlacement();
         CreateTrayIcon();
+
+        _barRefreshTimer.Tick += (_, _) =>
+        {
+            _barRefreshTimer.Stop();
+            RefreshBarNow();
+        };
 
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -100,19 +108,7 @@ public partial class MainWindow : FluentWindow
             }
         });
         _tray.OverlayToggleRequested += () => Dispatcher.Invoke(ToggleOverlay);
-        _tray.BarToggleRequested += () => Dispatcher.Invoke(() =>
-        {
-            if (_bar is { IsVisible: true })
-            {
-                HideBar();
-            }
-            else
-            {
-                ShowBar();
-            }
-
-            SyncMenus();
-        });
+        _tray.BarToggleRequested += () => Dispatcher.Invoke(ToggleBar);
         _tray.HistoryRequested += () => Dispatcher.Invoke(() => OpenSettings(SettingsTabs.Storico));
         _tray.ModelsRequested += () => Dispatcher.Invoke(() => OpenSettings(SettingsTabs.Modelli));
         _tray.SettingsRequested += () => Dispatcher.Invoke(() => OpenSettings(SettingsTabs.Aspetto));
@@ -229,6 +225,11 @@ public partial class MainWindow : FluentWindow
             failures.Add("Ctrl+Alt+O");
         }
 
+        if (!Win32.TryRegisterHotKey(this, HotkeyBar, modifiers, 0x42))
+        {
+            failures.Add("Ctrl+Alt+B");
+        }
+
         if (failures.Count > 0)
         {
             SetStatus($"Hotkey non disponibili (già usate da un altro programma): {string.Join(", ", failures)}");
@@ -262,6 +263,10 @@ public partial class MainWindow : FluentWindow
 
             case HotkeyOverlay:
                 ToggleOverlay();
+                break;
+
+            case HotkeyBar:
+                ToggleBar();
                 break;
         }
 
@@ -465,6 +470,7 @@ public partial class MainWindow : FluentWindow
         _bar.Show();
         _bar.ApplyLayout();
         RefreshBar();
+        SyncMenus();
         if (!_shotMode)
         {
             _settings.Save();
@@ -474,14 +480,54 @@ public partial class MainWindow : FluentWindow
     private void HideBar()
     {
         _bar?.Hide();
+        SyncMenus();
         if (!_shotMode)
         {
             _settings.Save();
         }
     }
 
+    private void ToggleBar()
+    {
+        if (_bar is { IsVisible: true })
+        {
+            HideBar();
+        }
+        else
+        {
+            ShowBar();
+        }
+    }
+
+    private void OnBarToggleChanged(object sender, RoutedEventArgs e)
+    {
+        if (BarToggle.IsChecked == true)
+        {
+            ShowBar();
+        }
+        else
+        {
+            HideBar();
+        }
+    }
+
     /// <summary>Passa i dati alla barra: frasi e stato dei controlli in un colpo solo.</summary>
     private void RefreshBar()
+    {
+        if (_bar is null)
+        {
+            return;
+        }
+
+        // I parziali possono arrivare più volte al secondo: si disegna al massimo ~15 volte
+        // al secondo, senza perdere l'ultimo stato.
+        if (!_barRefreshTimer.IsEnabled)
+        {
+            _barRefreshTimer.Start();
+        }
+    }
+
+    private void RefreshBarNow()
     {
         if (_bar is null)
         {
@@ -772,6 +818,42 @@ public partial class MainWindow : FluentWindow
         ExitApplication();
     }
 
+    /// <summary>
+    /// Autotest della barra: verifica che la finestra abbia davvero una regione non
+    /// rettangolare (COMPLEXREGION) invece del vecchio HWND squadrato con l'acrilico.
+    /// </summary>
+    internal async Task BarSelfTestAsync()
+    {
+        _shotMode = true;
+        ShowBar();
+        if (_bar is null)
+        {
+            SetStatus("Barra non disponibile.");
+            ExitApplication();
+            return;
+        }
+
+        _bar.EnableShotMode();
+        await Task.Delay(700);
+        var region = _bar.RegionType;
+        var message = region == 3
+            ? $"PASS: regione finestra COMPLEXREGION (angoli arrotondati reali) · {_bar.Describe()}"
+            : $"FAIL: regione finestra {region} (attesa 3 = COMPLEXREGION) · {_bar.Describe()}";
+
+        try
+        {
+            var path = Path.Combine(AppPaths.EnsureSubdirectory("logs"), "bar-selftest.txt");
+            File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // il log non deve far fallire l'autotest
+        }
+
+        Console.WriteLine(message);
+        ExitApplication();
+    }
+
     private double BarRadius() =>
         _bar is null ? 20 : Core.Settings.BarGeometry.CornerRadius(_bar.Height);
 
@@ -890,6 +972,7 @@ public partial class MainWindow : FluentWindow
         MenuBarBoth.IsChecked = _settings.BarText == BarTextMode.Entrambi;
         MenuBarOriginal.IsChecked = _settings.BarText == BarTextMode.Originale;
         MenuBarTranslation.IsChecked = _settings.BarText == BarTextMode.Traduzione;
+        BarToggle.IsChecked = _bar is { IsVisible: true };
     }
 
     /// <summary>
@@ -984,7 +1067,7 @@ public partial class MainWindow : FluentWindow
 
         _bar?.ForceClose();
 
-        foreach (var id in new[] { HotkeyShowHide, HotkeySystem, HotkeyMicrophone, HotkeySwap, HotkeyOverlay })
+        foreach (var id in new[] { HotkeyShowHide, HotkeySystem, HotkeyMicrophone, HotkeySwap, HotkeyOverlay, HotkeyBar })
         {
             Win32.UnregisterHotKey(this, id);
         }

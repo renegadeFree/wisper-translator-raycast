@@ -10,25 +10,36 @@ public static class BarGeometry
     public const double MaxWidth = 1600;
     public const double DefaultWidth = 1000;
 
-    /// <summary>Riga comandi in alto (equalizzatore, stato, pulsante principale).</summary>
-    public const double HandleHeight = 44;
+    /// <summary>Oltre due righe visibili la barra coprirebbe mezzo schermo: le altre restano in memoria.</summary>
+    public const int MaxRows = 2;
 
-    /// <summary>Altezza di una frase: originale su una riga e traduzione su due.</summary>
-    public const double RowHeight = 74;
+    /// <summary>Angoli del pannello di vetro: il riferimento è un rettangolo arrotondato, non una pillola.</summary>
+    public const double CornerRadiusValue = 20;
+
+    /// <summary>Riga comandi in alto (equalizzatore, stato, pulsante principale).</summary>
+    public const double HandleHeight = 48;
+
+    /// <summary>Altezza di una frase: originale su una riga e traduzione su due righe.</summary>
+    public const double RowHeight = 86;
 
     /// <summary>Spazio fra due frasi.</summary>
-    public const double RowGap = 4;
+    public const double RowGap = 6;
 
-    public const double BottomPadding = 10;
+    public const double BottomPadding = 8;
 
     /// <summary>Larghezza valida: valori assenti o assurdi non rompono la finestra.</summary>
     public static double ClampWidth(double width) =>
         double.IsFinite(width) ? Math.Clamp(width, MinWidth, MaxWidth) : DefaultWidth;
 
-    public static double ViewportHeight(int rows) => Math.Clamp(rows, 1, 3) * (RowHeight + RowGap);
+    public static double ViewportHeight(int rows) => Math.Clamp(rows, 1, MaxRows) * (RowHeight + RowGap);
 
     public static double WindowHeight(int rows) => HandleHeight + ViewportHeight(rows) + BottomPadding;
 
-    /// <summary>Capsula: il raggio è metà altezza, come nei riferimenti.</summary>
-    public static double CornerRadius(double height) => Math.Max(8, height / 2);
+    /// <summary>Raggio stabile, mai oltre metà altezza: è quello che rende la finestra una sola forma.</summary>
+    public static double CornerRadius(double height) =>
+        Math.Max(8, Math.Min(CornerRadiusValue, height / 2));
+
+    /// <summary>Diametro dell'ellisse di arrotondamento in pixel device, per SetWindowRgn.</summary>
+    public static int RegionDiameter(double radius, double dpiScale) =>
+        Math.Max(2, (int)Math.Round(radius * 2 * (dpiScale > 0 ? dpiScale : 1)));
 }

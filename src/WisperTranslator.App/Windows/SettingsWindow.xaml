@@ -150,7 +150,7 @@
                         <Separator Margin="0,16,0,12" />
                         <TextBlock TextWrapping="Wrap" FontSize="11"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   Text="Limiti dichiarati: le voci sovrapposte o molto simili possono essere confuse, le etichette vanno da Speaker 1 a Speaker 8, e i nomi non vengono ricordati tra una sessione e l'altra. Su PC con poca memoria la diarizzazione resta spenta finché non la si scarica qui." />
+                                   Text="Limiti dichiarati: le voci sovrapposte o molto simili possono essere confuse; Sortformer (predefinito) separa fino a 4 parlanti e Nemotron fino a 8. I nomi non vengono ricordati tra una sessione e l'altra. Su PC con poca memoria la diarizzazione resta spenta finché non la si scarica qui." />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -162,7 +162,7 @@
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    Text="La barra fluttuante sta sopra le altre finestre, si trascina ovunque e si aggancia ai bordi. Le frasi oltre quelle visibili restano sotto: si raggiungono con la rotellina del mouse mentre il puntatore è sulla barra." />
 
-                        <CheckBox x:Name="BarEnabledCheck" Content="Apri la barra all'avvio" Click="OnBarChanged" />
+                        <CheckBox x:Name="BarEnabledCheck" Content="Mostra la barra all'avvio" Click="OnBarChanged" />
                         <CheckBox x:Name="BarAnimationsCheck" Content="Animazioni (comparsa, respiro, scorrimento)"
                                   Margin="0,8,0,0" Click="OnBarChanged" />
                         <CheckBox x:Name="BarDiscreetCheck" Content="Modalità discreta: lascia passare i clic (maniglia esclusa)"
@@ -172,7 +172,7 @@
                         <ComboBox x:Name="BarTextBox" SelectionChanged="OnBarChanged" />
 
                         <controls:SliderRow x:Name="BarRowsRow" Label="Frasi visibili" Margin="0,14,0,0"
-                                            Minimum="1" Maximum="3" TickFrequency="1"
+                                            Minimum="1" Maximum="2" TickFrequency="1"
                                             ValueFormat="{}{0:0}" ValueChanged="OnBarChanged" />
                         <controls:SliderRow x:Name="BarWidthRow" Label="Larghezza barra" Margin="0,12,0,0"
                                             Minimum="480" Maximum="1600" TickFrequency="20"

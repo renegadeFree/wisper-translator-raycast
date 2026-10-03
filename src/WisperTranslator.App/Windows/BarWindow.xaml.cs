@@ -7,17 +7,15 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using WisperTranslator.App.Interop;
 using WisperTranslator.Core.Session;
 using WisperTranslator.Core.Settings;
 using Wpf.Ui.Controls;
+using Brush = System.Windows.Media.Brush;
 using Button = System.Windows.Controls.Button;
-using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 using Point = System.Windows.Point;
-using Rectangle = System.Windows.Shapes.Rectangle;
 
 namespace WisperTranslator.App.Windows;
 
@@ -33,33 +31,33 @@ public sealed record BarState(
     string SpeakerHint);
 
 /// <summary>
-/// Capsula fluttuante in stile Apple: acrilico, trascinabile ovunque, larga quanto basta a una
-/// frase intera su due righe. Non possiede la sessione: la comanda il pannello.
+/// Pannello di vetro fluttuante: la finestra è ritagliata ad angoli arrotondati e l'acrilico
+/// riempie esattamente quella forma. Non possiede la sessione: la comanda il pannello.
 /// </summary>
 public partial class BarWindow : FluentWindow
 {
     private const double SnapDistance = 16;
+    private const int WmSize = 0x0005;
     private const int WmNcHitTest = 0x0084;
     private const int WmSizing = 0x0214;
     private const int WmExitSizeMove = 0x0232;
+    private const int WmDpiChanged = 0x02E0;
     private const int HtTransparent = -1;
     private const int WmszLeft = 1;
-    private const int WmszRight = 2;
-    private const int WmszTop = 3;
     private const int WmszTopLeft = 4;
-    private const int WmszTopRight = 5;
-    private const int WmszBottom = 6;
     private const int WmszBottomLeft = 7;
-    private const int WmszBottomRight = 8;
 
     private static readonly Color Coral = Color.FromRgb(0xFF, 0x7A, 0x59);
     private static readonly Color StopColor = Color.FromRgb(0xFF, 0x5A, 0x5A);
+    private static readonly Color RowColor = Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF);
+    private static readonly Brush CoralBrush = Freeze(new SolidColorBrush(Coral));
+    private static readonly Brush StopBrush = Freeze(new SolidColorBrush(StopColor));
+    private static readonly Brush RowBrush = Freeze(new SolidColorBrush(RowColor));
 
     private readonly AppSettings _settings;
     private readonly ObservableCollection<CueView> _rows = [];
     private readonly HashSet<int> _finalSeen = [];
-    private readonly Rectangle[] _bars;
-    private readonly DispatcherTimer _equalizerTimer;
+    private readonly DispatcherTimer _pulseTimer;
     private HwndSource? _source;
     private bool _dragging;
     private bool _shot;
@@ -74,30 +72,31 @@ public partial class BarWindow : FluentWindow
 
         InitializeComponent();
         CueList.ItemsSource = _rows;
-        _bars = [Eq0, Eq1, Eq2, Eq3, Eq4];
 
         // Sopra tutto: è un widget, se finisse dietro al browser non servirebbe a niente.
         Topmost = settings.Topmost;
         ApplyLayout();
         RestorePlacement();
 
-        _equalizerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(70) };
-        _equalizerTimer.Tick += (_, _) => TickEqualizer();
+        StatusDot.RenderTransformOrigin = new Point(0.5, 0.5);
+        StatusDot.RenderTransform = new ScaleTransform(1, 1);
+
+        _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
+        _pulseTimer.Tick += (_, _) => TickPulse();
 
         Loaded += (_, _) =>
         {
+            ApplyWindowRegion();
             PlayAppearance();
-            _equalizerTimer.Start();
+            _pulseTimer.Start();
         };
 
         LocationChanged += (_, _) =>
         {
-            if (!_dragging)
+            if (_dragging)
             {
-                return;
+                SnapToEdges();
             }
-
-            SnapToEdges();
         };
 
         Closing += OnClosing;
@@ -133,7 +132,7 @@ public partial class BarWindow : FluentWindow
     /// <summary>Righe visibili, larghezza, altezza e raggio: tutto dipende dalle impostazioni.</summary>
     public void ApplyLayout()
     {
-        var rows = Math.Clamp(_settings.BarRows, 1, 3);
+        var rows = Math.Clamp(_settings.BarRows, 1, BarGeometry.MaxRows);
         var width = BarGeometry.ClampWidth(_settings.BarWidth);
         var height = BarGeometry.WindowHeight(rows);
         var radius = BarGeometry.CornerRadius(height);
@@ -147,8 +146,8 @@ public partial class BarWindow : FluentWindow
         Width = width;
         Height = height;
         Shell.CornerRadius = new CornerRadius(radius);
-        Veil.RadiusX = Veil.RadiusY = Math.Max(0, radius - 1);
-        Glass.RadiusX = Glass.RadiusY = Math.Max(0, radius - 1);
+        Glass.CornerRadius = new CornerRadius(Math.Max(0, radius - 1));
+        ApplyWindowRegion();
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -156,6 +155,39 @@ public partial class BarWindow : FluentWindow
         base.OnSourceInitialized(e);
         _source = HwndSource.FromHwnd(Win32.Handle(this));
         _source?.AddHook(WndProc);
+        ApplyWindowRegion();
+    }
+
+    /// <summary>
+    /// Il trucco che elimina il rettangolo: la regione dell'HWND è un rettangolo arrotondato,
+    /// quindi l'acrilico non può disegnare i quattro angoli fuori dalla forma.
+    /// </summary>
+    private void ApplyWindowRegion()
+    {
+        if (_source is null && Win32.Handle(this) == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var dpi = 1.0;
+        try
+        {
+            dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        }
+        catch (Exception)
+        {
+            // prima della presentazione si usa il fattore standard
+        }
+
+        var width = ActualWidth > 1 ? ActualWidth : Width;
+        var height = ActualHeight > 1 ? ActualHeight : Height;
+        var radius = BarGeometry.CornerRadius(height);
+        var diameter = BarGeometry.RegionDiameter(radius, dpi);
+        Win32.ApplyRoundedRegion(
+            this,
+            (int)Math.Round(width * dpi),
+            (int)Math.Round(height * dpi),
+            diameter);
     }
 
     /// <summary>
@@ -165,20 +197,20 @@ public partial class BarWindow : FluentWindow
     public void EnableShotMode()
     {
         _shot = true;
-        Veil.Opacity = 1;
-        Veil.Fill = new SolidColorBrush(Color.FromRgb(0x0E, 0x0E, 0x12));
-        Glass.Fill = Brushes.Transparent;
+        _pulseTimer.Stop();
+        Shell.Background = new SolidColorBrush(Color.FromRgb(0x0E, 0x0E, 0x12));
+        Glass.Opacity = 0;
         ControlsPanel.Opacity = 1;
 
-        // Niente trasformazioni in corso: la foto deve mostrare la capsula a misura piena.
+        // Niente trasformazioni in corso: la foto deve mostrare il pannello a misura piena.
         Shell.RenderTransform = Transform.Identity;
         ControlsPanel.RenderTransform = Transform.Identity;
         CueList.RenderTransform = Transform.Identity;
     }
 
     /// <summary>
-    /// Aggiorna frasi e controlli. L'animazione parte solo quando arriva una frase nuova,
-    /// non a ogni ritocco della traduzione.
+    /// Aggiorna frasi e controlli. L'elenco viene aggiornato in place: con i parziali rapidi
+    /// svuotarlo a ogni tick faceva lampeggiare e scattare la barra.
     /// </summary>
     public void Sync(IReadOnlyList<Cue> cues, BarState state)
     {
@@ -193,11 +225,24 @@ public partial class BarWindow : FluentWindow
             _finalSeen.Clear();
         }
 
-        _rows.Clear();
-        foreach (var cue in top)
+        for (var index = 0; index < top.Count; index++)
         {
+            var cue = top[index];
             var flash = cue.IsFinal && _finalSeen.Add(cue.Id);
-            _rows.Add(CueView.From(cue, _settings.BarText, primary, flash));
+            var view = CueView.From(cue, _settings.BarText, primary, flash);
+            if (index < _rows.Count)
+            {
+                _rows[index] = view;
+            }
+            else
+            {
+                _rows.Add(view);
+            }
+        }
+
+        while (_rows.Count > top.Count)
+        {
+            _rows.RemoveAt(_rows.Count - 1);
         }
 
         if (top.Count > 0 && top[0].Id != _lastTopId)
@@ -205,33 +250,30 @@ public partial class BarWindow : FluentWindow
             _lastTopId = top[0].Id;
             PlayArrival();
         }
+        else if (top.Count == 0)
+        {
+            _lastTopId = -1;
+        }
 
         _running = state.Running;
-        TitleText.Text = state.Running ? "Wisper · in ascolto" : "Wisper";
-        HandleStatus.Text = state.Status;
+        StatusLabel.Text = state.Running
+            ? "In ascolto"
+            : state.Status.Length > 0 ? state.Status : "Pronto";
         SpeakerHintText.Text = state.SpeakerHint;
         IdleHint.Opacity = top.Count == 0 ? 0.75 : 0;
         IdleHint.Text = state.Running ? "In ascolto…" : "Premi Avvia per i sottotitoli";
+        StatusDot.Opacity = state.Running ? 1 : 0.45;
 
         PrimaryIcon.Symbol = state.Running ? SymbolRegular.Stop24 : SymbolRegular.Play24;
         if (PrimaryButton.Template.FindName("Circle", PrimaryButton) is Border circle)
         {
-            circle.Background = new SolidColorBrush(state.Running ? StopColor : Coral);
+            circle.Background = state.Running ? StopBrush : CoralBrush;
         }
 
         SetControlState(SystemButton, state.SystemAudio);
         SetControlState(MicrophoneButton, state.Microphone);
         SetControlState(ConversationButton, state.Conversation);
         SetControlState(TranslateButton, _settings.Translate);
-        SetControlState(DiscreetButton, _settings.BarDiscreet);
-        TextModeButton.Opacity = _settings.BarText == BarTextMode.Entrambi ? 0.7 : 1;
-
-        TextModeButton.ToolTip = _settings.BarText switch
-        {
-            BarTextMode.Originale => "Testo: solo originale",
-            BarTextMode.Traduzione => "Testo: solo traduzione",
-            _ => "Testo: originale e traduzione",
-        };
 
         TranslateButton.ToolTip = _settings.Translate
             ? "Traduzione attiva (clic per solo trascrizione)"
@@ -251,12 +293,13 @@ public partial class BarWindow : FluentWindow
     private sealed record CueView(
         string Original,
         string Main,
-        string MainColor,
+        Brush MainBrush,
         string Trail,
+        Brush TrailBrush,
         string SpeakerLabel,
-        string BadgeBackground,
-        string BadgeForeground,
-        string RowBackground,
+        Brush BadgeBackground,
+        Brush BadgeForeground,
+        Brush RowBackground,
         bool HasSpeaker,
         bool HasOriginal,
         bool HasMain,
@@ -289,23 +332,49 @@ public partial class BarWindow : FluentWindow
                 }
             }
 
-            var speaker = cue.HasSpeaker ? cue.SpeakerColor.TrimStart('#') : string.Empty;
             return new CueView(
                 originalLine,
                 mainLine,
-                ToHex(mainIsProvisional ? Coral : primary),
+                mainIsProvisional ? CoralBrush : Freeze(new SolidColorBrush(primary)),
                 trail,
+                CoralBrush,
                 cue.SpeakerLabel,
-                speaker.Length == 6 ? $"#33{speaker}" : "#00000000",
-                cue.SpeakerColor,
-                flash ? "#26FF7A59" : "#12FFFFFF",
+                ToBrush(cue.HasSpeaker ? cue.SpeakerColor : "#00000000", 0x33),
+                Freeze(new SolidColorBrush(ToColor(cue.SpeakerColor))),
+                RowBrush,
                 cue.HasSpeaker,
                 originalLine.Length > 0,
                 mainLine.Length > 0,
                 flash);
         }
 
-        private static string ToHex(Color color) => $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        private static Brush Freeze(Brush brush)
+        {
+            brush.Freeze();
+            return brush;
+        }
+
+        private static Brush ToBrush(string hex, int alpha)
+        {
+            var color = ToColor(hex);
+            return Freeze(new SolidColorBrush(Color.FromArgb((byte)alpha, color.R, color.G, color.B)));
+        }
+
+        private static Color ToColor(string hex)
+        {
+            var value = hex.TrimStart('#');
+            if (value.Length != 6
+                || !uint.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var parsed))
+            {
+                return Colors.Transparent;
+            }
+
+            return Color.FromRgb((byte)(parsed >> 16), (byte)(parsed >> 8), (byte)parsed);
+        }
     }
 
     private void RestorePlacement()
@@ -428,42 +497,42 @@ public partial class BarWindow : FluentWindow
         return animation;
     }
 
-    /// <summary>
-    /// Equalizzatore: quando ascolta segue il livello audio reale, a riposo respira piano.
-    /// Ogni barretta ha una fase diversa, così il movimento non sembra un blocco unico.
-    /// </summary>
-    private void TickEqualizer()
+    /// <summary>Punto di stato: pulsa con il livello audio reale, respira piano a riposo.</summary>
+    private void TickPulse()
     {
+        if (_shot || StatusDot.RenderTransform is not ScaleTransform scale)
+        {
+            return;
+        }
+
         if (!_settings.BarAnimations)
         {
-            foreach (var bar in _bars)
-            {
-                bar.Height = 6;
-            }
-
+            scale.ScaleX = scale.ScaleY = 1;
             return;
         }
 
         var level = _running ? Math.Clamp(LevelProvider?.Invoke() ?? 0f, 0f, 1f) : 0f;
         _level = (_level * 0.62) + (level * 0.38);
-
         var time = Environment.TickCount64 / 1000.0;
-        for (var index = 0; index < _bars.Length; index++)
-        {
-            var wave = _running
-                ? 0.3 + (0.7 * Math.Abs(Math.Sin((time * 3.4) + (index * 0.85))))
-                : 0.16 + (0.1 * Math.Sin((time * 1.3) + (index * 0.7)));
-            var height = 4 + (18 * wave * (0.4 + (0.6 * _level)));
-            _bars[index].Height = _shot ? 4 + (14 * wave) : height;
-        }
+        var wave = _running
+            ? 0.5 + (0.5 * Math.Abs(Math.Sin(time * 3.2)))
+            : 0.12 + (0.08 * Math.Sin(time * 1.4));
+        var value = 1 + (0.5 * wave * (0.35 + (0.65 * _level)));
+        scale.ScaleX = scale.ScaleY = value;
     }
 
     /// <summary>
-    /// Ciclo dei messaggi: modalità discreta (i clic passano tranne che sulla maniglia) e
-    /// ridimensionamento orizzontale con l'altezza bloccata.
+    /// Ciclo dei messaggi: modalità discreta (i clic passano tranne che sulla maniglia),
+    /// ridimensionamento orizzontale e riapplicazione della regione dopo ogni cambio di forma.
     /// </summary>
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg is WmSize or WmDpiChanged)
+        {
+            ApplyWindowRegion();
+            return IntPtr.Zero;
+        }
+
         if (msg == WmSizing)
         {
             handled = true;
@@ -489,7 +558,7 @@ public partial class BarWindow : FluentWindow
 
         var x = unchecked((short)(long)lParam);
         var y = unchecked((short)((long)lParam >> 16));
-        var local = PointFromScreen(new System.Windows.Point(x, y));
+        var local = PointFromScreen(new Point(x, y));
 
         if (local.Y > BarGeometry.HandleHeight && local.X > 0 && local.X < Width)
         {
@@ -501,7 +570,7 @@ public partial class BarWindow : FluentWindow
     }
 
     /// <summary>
-    /// Larghezza libera, altezza fissa: la capsula cambia solo in orizzontale.
+    /// Larghezza libera, altezza fissa: il pannello cambia solo in orizzontale.
     /// </summary>
     private IntPtr ResizeHorizontally(int edge, IntPtr lParam)
     {
@@ -565,19 +634,22 @@ public partial class BarWindow : FluentWindow
     public void ForceClose()
     {
         _forceClose = true;
-        _equalizerTimer.Stop();
+        _pulseTimer.Stop();
         Close();
     }
 
     /// <summary>Descrizione delle misure reali: serve a capire subito un ritaglio sbagliato.</summary>
     internal string Describe() =>
         $"finestra {Width:F0}x{Height:F0} (min {MinHeight:F0}/{MinWidth:F0}) · "
-        + $"capsula {Shell.ActualWidth:F0}x{Shell.ActualHeight:F0} · "
+        + $"pannello {Shell.ActualWidth:F0}x{Shell.ActualHeight:F0} · "
         + $"elenco {Scroller.ActualWidth:F0}x{Scroller.ActualHeight:F0} (chiesto {Scroller.Height:F0}) · "
-        + $"righe 1–3 visibili, in memoria {_rows.Count}";
+        + $"righe 1–2 visibili, in memoria {_rows.Count}";
 
-    /// <summary>Elemento da fotografare: la capsula, senza il margine dell'ombra della finestra.</summary>
+    /// <summary>Elemento da fotografare: il pannello, senza il margine dell'ombra della finestra.</summary>
     internal FrameworkElement ShotTarget => Shell;
+
+    /// <summary>3 = COMPLEXREGION: la finestra non è più un semplice rettangolo.</summary>
+    internal int RegionType => Win32.WindowRegionType(this);
 
     private void OnStartStopClicked(object sender, RoutedEventArgs e) => StartStopRequested?.Invoke();
 
@@ -602,4 +674,10 @@ public partial class BarWindow : FluentWindow
     private void OnSettingsClicked(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke();
 
     private void OnHideClicked(object sender, RoutedEventArgs e) => HideRequested?.Invoke();
+
+    private static Brush Freeze(Brush brush)
+    {
+        brush.Freeze();
+        return brush;
+    }
 }

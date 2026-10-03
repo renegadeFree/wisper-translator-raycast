@@ -210,7 +210,7 @@ public class SpeakerTests : IDisposable
     {
         var settings = new WisperTranslator.Core.Settings.AppSettings();
 
-        Assert.True(settings.StartWithBar);
+        Assert.False(settings.StartWithBar);
         Assert.Equal(2, settings.BarRows);
         Assert.Equal(5, settings.BarBuffer);
         Assert.Equal(WisperTranslator.Core.Settings.BarTextMode.Entrambi, settings.BarText);
@@ -227,10 +227,48 @@ public class SpeakerTests : IDisposable
         Assert.Equal(147_075_776, ModelCatalog.SortformerDiarization.ExpectedSizeBytes);
         Assert.All(NeMoModels.Diarizers, entry => Assert.Equal(WisperTranslator.Core.Models.ModelRole.Diarization, entry.Role));
         Assert.Equal("diar", WisperTranslator.Core.Models.ModelStore.RoleFolder(WisperTranslator.Core.Models.ModelRole.Diarization));
-        Assert.Equal(ModelCatalog.NemotronDiarization, NeMoModels.DiarizerEntry("id-ignoto"));
+        Assert.Equal(ModelCatalog.SortformerDiarization, NeMoModels.DiarizerEntry("id-ignoto"));
     }
 
     private static IReadOnlyList<AsrSegment> Group(IEnumerable<(string Word, double Start, double End, int Speaker)> words) =>
         NeMoSpeechEngine.GroupBySpeaker(
             [.. words.Select(word => new NeMoSpeechEngine.TranscriptionWord(word.Word, word.Start, word.End, word.Speaker))]);
+
+    [Fact]
+    public void LeParoleSenzaDiarizzazioneMantengonoITempi()
+    {
+        var words = NeMoSpeechEngine.Words(
+        [
+            new NeMoSpeechEngine.TranscriptionWord("ciao", 0.2, 0.6, null),
+            new NeMoSpeechEngine.TranscriptionWord("a", 0.7, 0.8, null),
+            new NeMoSpeechEngine.TranscriptionWord("tutti", 0.9, 1.2, null),
+        ]);
+
+        Assert.Equal(3, words.Count);
+        Assert.Equal("ciao", words[0].Text);
+        Assert.Equal(0, words[0].Speaker);
+        Assert.Equal(0.2, words[0].Start.TotalSeconds, 3);
+    }
+
+    [Fact]
+    public void LaDiarizzazioneDifferitaAssegnaIlParlanteAlCentroDellaParola()
+    {
+        var words = new[]
+        {
+            new AsrSegment("ciao", TimeSpan.FromSeconds(0.5), TimeSpan.FromSeconds(0.3)),
+            new AsrSegment("a", TimeSpan.FromSeconds(1.2), TimeSpan.FromSeconds(0.2)),
+            new AsrSegment("tutti", TimeSpan.FromSeconds(2.5), TimeSpan.FromSeconds(0.4)),
+        };
+        var segments = new[]
+        {
+            new DiarizationSegment(0.0, 1.5, 1),
+            new DiarizationSegment(2.0, 3.0, 2),
+        };
+
+        var tagged = NeMoDiarizationClient.ApplySpeakers(words, segments);
+
+        Assert.Equal(1, tagged[0].Speaker);
+        Assert.Equal(1, tagged[1].Speaker);
+        Assert.Equal(2, tagged[2].Speaker);
+    }
 }

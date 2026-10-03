@@ -68,9 +68,20 @@ internal static class SpeechClips
         ssml.Append($"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"{language}\">");
         for (var index = 0; index < sentences.Count; index++)
         {
-            var voice = ResolveVoice(voiceNames[index % voiceNames.Count]);
+            var parts = voiceNames[index % voiceNames.Count].Split('|', 2, StringSplitOptions.TrimEntries);
+            var voice = ResolveVoice(parts[0]);
             ssml.Append($"<voice name=\"{voice}\">");
+            if (parts.Length > 1 && parts[1].Length > 0)
+            {
+                ssml.Append($"<prosody pitch=\"{parts[1]}\">");
+            }
+
             ssml.Append(Escape(sentences[index]));
+            if (parts.Length > 1 && parts[1].Length > 0)
+            {
+                ssml.Append("</prosody>");
+            }
+
             ssml.Append("</voice>");
             if (index < sentences.Count - 1)
             {

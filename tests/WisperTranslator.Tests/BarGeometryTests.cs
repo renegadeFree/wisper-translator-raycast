@@ -16,9 +16,9 @@ public class BarGeometryTests
     }
 
     [Fact]
-    public void IlRaggioDellaCapsulaEMetaAltezza()
+    public void IlRaggioRestaUnRettangoloArrotondato()
     {
-        Assert.Equal(105, BarGeometry.CornerRadius(BarGeometry.WindowHeight(2)));
+        Assert.Equal(BarGeometry.CornerRadiusValue, BarGeometry.CornerRadius(BarGeometry.WindowHeight(2)));
         // Sotto una certa altezza non si scende: resterebbe un rettangolo spigoloso.
         Assert.Equal(8, BarGeometry.CornerRadius(4));
     }
@@ -26,11 +26,18 @@ public class BarGeometryTests
     [Fact]
     public void AltezzaELarghezzaSeguonoLeImpostazioni()
     {
-        Assert.Equal(78, BarGeometry.ViewportHeight(1));
-        Assert.Equal(156, BarGeometry.ViewportHeight(2));
-        // Oltre tre righe non si va: la barra coprirebbe lo schermo.
-        Assert.Equal(234, BarGeometry.ViewportHeight(9));
-        Assert.Equal(210, BarGeometry.WindowHeight(2));
+        Assert.Equal(92, BarGeometry.ViewportHeight(1));
+        Assert.Equal(184, BarGeometry.ViewportHeight(2));
+        // Oltre due righe non si va: la barra coprirebbe lo schermo.
+        Assert.Equal(184, BarGeometry.ViewportHeight(9));
+        Assert.Equal(240, BarGeometry.WindowHeight(2));
+    }
+
+    [Fact]
+    public void IlDiametroDellaRegioneSegueIlDpi()
+    {
+        Assert.Equal(40, BarGeometry.RegionDiameter(BarGeometry.CornerRadiusValue, 1.0));
+        Assert.Equal(50, BarGeometry.RegionDiameter(BarGeometry.CornerRadiusValue, 1.25));
     }
 
     [Fact]

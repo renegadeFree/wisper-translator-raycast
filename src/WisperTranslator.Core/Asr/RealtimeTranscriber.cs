@@ -65,6 +65,8 @@ public sealed class RealtimeTranscriber : IDisposable
     private readonly IAsrEngine _engine;
     private readonly IAsrEngine _finalEngine;
     private readonly RealtimeOptions _options;
+    private NeMoRealtimeClient? _streaming;
+    private readonly int _streamingPort;
     private readonly SemaphoreSlim _signal = new(0);
     private readonly SemaphoreSlim _finalSignal = new(0);
     private readonly object _gate = new();
@@ -78,7 +80,12 @@ public sealed class RealtimeTranscriber : IDisposable
     private int _policyUtterance;
     private int _utteranceId;
     private volatile bool _partialBusy;
+    private volatile bool _restartStreaming;
     private TimeSpan _partialInterval;
+    private string? _language;
+    private int _streamingUtterance;
+    private TimeSpan _streamingStart;
+    private long _samplesSeen;
     private bool _disposed;
 
     public RealtimeTranscriber(
@@ -86,7 +93,8 @@ public sealed class RealtimeTranscriber : IDisposable
         SpeechSegmenter segmenter,
         IAsrEngine engine,
         RealtimeOptions? options = null,
-        IAsrEngine? finalEngine = null)
+        IAsrEngine? finalEngine = null,
+        NeMoRealtimeClient? streaming = null)
     {
         _source = source;
         _segmenter = segmenter;
@@ -94,6 +102,12 @@ public sealed class RealtimeTranscriber : IDisposable
         _finalEngine = finalEngine ?? engine;
         _options = options ?? new RealtimeOptions();
         _partialInterval = _options.PartialInterval;
+        if (streaming is not null)
+        {
+            _streaming = streaming;
+            _streamingPort = streaming.Port;
+            _streaming.Update += OnStreamingUpdate;
+        }
     }
 
     /// <summary>Testo committato (parziale stabile o frase finale).</summary>
@@ -104,8 +118,28 @@ public sealed class RealtimeTranscriber : IDisposable
 
     public event Action<SpeechSegment>? SegmentClosed;
 
+    /// <summary>Audio e parole dell'enunciato appena concluso: servono alla diarizzazione differita.</summary>
+    public event Action<int, TimeSpan, float[], AsrResult>? FinalResolved;
+
+    /// <summary>Frase completa arrivata dallo streaming, con i parlanti se il server li ha dati.</summary>
+    /// <summary>Ogni blocco audio con il suo tempo: lo usa la diarizzazione a finestra scorrevole.</summary>
+    public event Action<float[], TimeSpan>? AudioBlock;
+
     /// <summary>Lingua forzata per il motore ASR (null = rilevamento automatico).</summary>
-    public string? Language { get; set; }
+    public string? Language
+    {
+        get => _language;
+        set
+        {
+            if (string.Equals(_language, value, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _language = value;
+            _restartStreaming = true;
+        }
+    }
 
     public int FinalSegments { get; private set; }
 
@@ -114,6 +148,8 @@ public sealed class RealtimeTranscriber : IDisposable
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        await StartStreamingAsync(cancellationToken).ConfigureAwait(false);
+
         // Due corsie indipendenti: i parziali non aspettano mai la rifinitura della frase
         // precedente, che era la causa della sensazione di testo "in ritardo".
         var partialWorker = Task.Run(() => PartialWorkerAsync(cancellationToken), CancellationToken.None);
@@ -135,12 +171,21 @@ public sealed class RealtimeTranscriber : IDisposable
                     continue;
                 }
 
+                if (AudioBlock is not null)
+                {
+                    AudioBlock(block[..read], TimeSpan.FromSeconds(_samplesSeen / (double)SampleRate));
+                }
+
+                _samplesSeen += read;
+
                 var closed = _segmenter.Feed(block.AsSpan(0, read));
                 var now = DateTime.UtcNow;
 
                 if (_segmenter.InSpeech && !wasInSpeech)
                 {
                     currentUtterance = ++_utteranceId;
+                    Volatile.Write(ref _streamingUtterance, currentUtterance);
+                    _streamingStart = _segmenter.CurrentUtteranceStart;
                 }
 
                 if (closed.Count > 0)
@@ -162,10 +207,22 @@ public sealed class RealtimeTranscriber : IDisposable
                     continue;
                 }
 
+                if (_streaming is { IsFaulted: false })
+                {
+                    _streaming.Push(block.AsSpan(0, read));
+                }
+                else if (_streaming is { IsFaulted: true })
+                {
+                    // La corsia streaming è caduta: si torna ai parziali batch senza fermare nulla.
+                    _streaming = null;
+                    _lastPartialText = null;
+                }
+
                 wasInSpeech = _segmenter.InSpeech;
 
                 // Con il worker occupato un nuovo parziale non farebbe che accodare lavoro vecchio.
-                if (_segmenter.InSpeech
+                if (_streaming is null
+                    && _segmenter.InSpeech
                     && !_partialBusy
                     && now - lastPartialAt >= _partialInterval
                     && _segmenter.TryCopyCurrentUtterance(out var samples)
@@ -185,6 +242,11 @@ public sealed class RealtimeTranscriber : IDisposable
                     }
 
                     _signal.Release();
+                }
+
+                if (_restartStreaming && _streaming is not null)
+                {
+                    await RestartStreamingAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -214,6 +276,64 @@ public sealed class RealtimeTranscriber : IDisposable
                 LastError ??= "Decodifica interrotta in corso: sessione fermata comunque.";
             }
         }
+    }
+
+    private async Task StartStreamingAsync(CancellationToken cancellationToken)
+    {
+        if (_streaming is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _streaming.StartAsync(_language, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            _streaming.Update -= OnStreamingUpdate;
+            _streaming = null;
+        }
+    }
+
+    private async Task RestartStreamingAsync(CancellationToken cancellationToken)
+    {
+        _restartStreaming = false;
+        if (_streaming is null)
+        {
+            return;
+        }
+
+        var previous = _streaming;
+        previous.Update -= OnStreamingUpdate;
+        _streaming = null;
+        await previous.DisposeAsync().ConfigureAwait(false);
+
+        var next = new NeMoRealtimeClient(_streamingPort);
+        next.Update += OnStreamingUpdate;
+        _streaming = next;
+        await StartStreamingAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Il WebSocket manda il testo del blocco corrente. Lo pubblichiamo come parziale:
+    /// la frase definitiva batch resta l'autorità e sostituirà questa anteprima.
+    /// </summary>
+    private void OnStreamingUpdate(string text, bool completed)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        Update?.Invoke(new TranscriptUpdate(
+            Volatile.Read(ref _streamingUtterance),
+            text.Trim(),
+            false,
+            _streamingStart,
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            Provisional: string.Empty));
     }
 
     /// <summary>Corsia dei parziali: produce il testo provvisorio mentre si parla.</summary>
@@ -350,6 +470,7 @@ public sealed class RealtimeTranscriber : IDisposable
                     DateTime.UtcNow - closedAt,
                     Turns: BuildTurns(result)));
                 SegmentClosed?.Invoke(final);
+                FinalResolved?.Invoke(utterance, final.Start, final.Samples, result);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -417,5 +538,19 @@ public sealed class RealtimeTranscriber : IDisposable
         _disposed = true;
         _signal.Dispose();
         _finalSignal.Dispose();
+        if (_streaming is not null)
+        {
+            _streaming.Update -= OnStreamingUpdate;
+            try
+            {
+                _streaming.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
+            }
+            catch (Exception)
+            {
+                // lo stop non deve restare appeso alla socket
+            }
+
+            _streaming = null;
+        }
     }
 }

@@ -36,6 +36,11 @@ public partial class App : Application
         MainWindow = window;
         window.Show();
 
+        if (e.Args.Contains("--bar-selftest", StringComparer.OrdinalIgnoreCase))
+        {
+            _ = SafeAsync(window.BarSelfTestAsync);
+        }
+
         // Spegnimento o disconnessione: il programma deve chiudersi davvero, non nascondersi.
         SessionEnding += (_, _) =>
         {
