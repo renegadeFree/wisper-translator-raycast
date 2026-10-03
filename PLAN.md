@@ -1061,14 +1061,14 @@ acrilica», «poi fai push e release».
 | F25.4 | I prompt IA ricevono la trascrizione con i nomi dei parlanti | ✅ |
 | F25.5 | Nuove schede **Conversazione** e **Barra**; gli indici sono centralizzati in `SettingsTabs` così le scorciatoie `--settings=n` restano valide | ✅ |
 
-### F26 — Test, documentazione e release v2.0.0 (🔄)
+### F26 — Test, documentazione e release v2.0.0 (✅)
 
 | # | Attività | Esito |
 |---|---|---|
 | F26.1 | Test automatici: **78 verdi** | ✅ |
-| F26.2 | `docs/CONVERSAZIONE.md`, README illustrato con screenshot reali, `THIRD-PARTY-NOTICES.md` con le licenze dei diarizzatori | 🔄 |
-| F26.3 | Installer 2.0.0 e installazione silenziosa | 🔄 |
-| F26.4 | Push su `main`, tag `v2.0.0` e release con installer e SHA-256 | 🔄 |
+| F26.2 | `docs/CONVERSAZIONE.md`, README illustrato con screenshot reali, `THIRD-PARTY-NOTICES.md` con le licenze dei diarizzatori | ✅ |
+| F26.3 | Installer **2.0.0** (89,8 MB) e installazione silenziosa: codice 0, versione del binario 2.0.0.0, avvio+stop in **76 ms** senza errori | ✅ verificato |
+| F26.4 | Push su `main` (`13b659f`), tag `v2.0.0`, release con installer e SHA-256 `1B789866978A54FDDBB5DDC1937EDF72EBFD00B985B95D0FB6A8528C6A262E0E` | ✅ [release v2.0.0](https://github.com/renegadeFree/wisper-translator/releases/tag/v2.0.0) |
 
 **Comandi aggiunti per le verifiche:**
 
