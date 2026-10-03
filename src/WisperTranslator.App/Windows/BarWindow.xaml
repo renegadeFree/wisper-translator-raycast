@@ -5,23 +5,26 @@
         Title="Wisper · Trascrizione"
         Width="760" Height="248" MinWidth="480" MaxWidth="1600"
         WindowStyle="None" ResizeMode="NoResize"
+        AllowsTransparency="True"
         ShowInTaskbar="False" ShowActivated="False"
         WindowStartupLocation="Manual"
-        Background="#01000000"
-        FontFamily="Segoe UI" Foreground="#F3F3F6"
+        Background="Transparent"
+        FontFamily="Segoe UI Variable Text, Segoe UI, -apple-system, BlinkMacSystemFont, Roboto, sans-serif"
+        Foreground="#FFFFFF"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
         UseLayoutRounding="True" SnapsToDevicePixels="True">
-    <!-- Finestra normale (non a strati) con sfondo quasi trasparente: è il vetro di Windows a
-         riempire la finestra, e sono gli angoli arrotondati di DWM a ritagliarlo. Il pannello
-         deve quindi riempire la finestra e usare lo stesso raggio di DWM, altrimenti resta
-         scoperto un pezzo di vetro con il bordo squadrato. -->
     <Window.Resources>
-        <SolidColorBrush x:Key="BarPrimary" Color="#F3F3F6" />
-        <SolidColorBrush x:Key="BarSecondary" Color="#B4B4C2" />
-        <SolidColorBrush x:Key="BarMuted" Color="#9292A3" />
+        <SolidColorBrush x:Key="BarPrimary" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="BarSecondary" Color="#CBD5E1" />
+        <SolidColorBrush x:Key="BarMuted" Color="#94A3B8" />
+        <SolidColorBrush x:Key="BarActiveAccent" Color="#10B981" />
+
+        <!-- Pulsanti di controllo a pillola stile Raycast / Apple Glass -->
         <Style x:Key="GlassButton" TargetType="Button">
-            <Setter Property="Width" Value="30" />
+            <Setter Property="Width" Value="32" />
             <Setter Property="Height" Value="30" />
-            <Setter Property="Margin" Value="3,0,0,0" />
+            <Setter Property="Margin" Value="2,0" />
             <Setter Property="Foreground" Value="{DynamicResource BarSecondary}" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Cursor" Value="Hand" />
@@ -34,14 +37,14 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Circle" Property="Background" Value="#1AFFFFFF" />
+                                <Setter TargetName="Circle" Property="Background" Value="#25FFFFFF" />
                                 <Setter Property="Foreground" Value="{DynamicResource BarPrimary}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Circle" Property="BorderBrush" Value="#FF8B73" />
+                                <Setter TargetName="Circle" Property="BorderBrush" Value="#45FFFFFF" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Circle" Property="Background" Value="#2CFFFFFF" />
+                                <Setter TargetName="Circle" Property="Background" Value="#38FFFFFF" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35" />
@@ -51,45 +54,61 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Pulsante di azione primario vivace (Play / Stop) -->
         <Style x:Key="PrimaryButton" TargetType="Button">
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="30" />
             <Setter Property="Foreground" Value="#FFFFFF" />
-            <Setter Property="Background" Value="#FF7A59" />
+            <Setter Property="Background" Value="#FF5733" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Primary" CornerRadius="8"
                                 Background="{TemplateBinding Background}"
-                                BorderBrush="#14FFFFFF" BorderThickness="1">
+                                BorderBrush="#30FFFFFF" BorderThickness="1">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Primary" Property="Background" Value="#FF7777" />
+                                <Setter TargetName="Primary" Property="Background" Value="#FF6F4E" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Primary" Property="Background" Value="#E84F4F" />
+                                <Setter TargetName="Primary" Property="Background" Value="#E04622" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.5" />
+                                <Setter Property="Opacity" Value="0.45" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
         <Style TargetType="ToolTip">
-            <Setter Property="Foreground" Value="#F3F3F6" />
-            <Setter Property="Background" Value="#F022222C" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Background" Value="#F514141E" />
             <Setter Property="BorderBrush" Value="#35FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
+
         <Style TargetType="ContextMenu">
             <Setter Property="Foreground" Value="{DynamicResource BarPrimary}" />
-            <Setter Property="Background" Value="#F522222C" />
-            <Setter Property="BorderBrush" Value="#28FFFFFF" />
+            <Setter Property="Background" Value="#F514141E" />
+            <Setter Property="BorderBrush" Value="#25FFFFFF" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ContextMenu">
@@ -103,52 +122,69 @@
         </Style>
     </Window.Resources>
 
-    <Border x:Name="Shell" CornerRadius="18" BorderThickness="1" BorderBrush="#35FFFFFF"
-            Background="#A6181821" ClipToBounds="True"
+    <!-- Barra fluttuante Raycast ad alto contrasto: dark obsidian quasi solido con micro-bordo luminoso -->
+    <Border x:Name="Shell" CornerRadius="18" BorderThickness="1"
+            RenderOptions.ClearTypeHint="Enabled"
+            Background="#F5111116" ClipToBounds="True"
             SizeChanged="OnShellSizeChanged"
             PreviewMouseLeftButtonDown="OnShellMouseDown"
             MouseMove="OnShellMouseMove"
             PreviewMouseLeftButtonUp="OnShellMouseUp"
             MouseEnter="OnShellMouseEnter"
             MouseLeave="OnShellMouseLeave">
+        <Border.BorderBrush>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#40FFFFFF" Offset="0" />
+                <GradientStop Color="#1CFFFFFF" Offset="0.3" />
+                <GradientStop Color="#10FFFFFF" Offset="1" />
+            </LinearGradientBrush>
+        </Border.BorderBrush>
+
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition x:Name="HandleRowHeight" Height="48" />
-                <RowDefinition x:Name="BodyRowHeight" Height="Auto" />
-                <RowDefinition x:Name="FooterRowHeight" Height="32" />
+                <RowDefinition x:Name="BodyRowHeight" Height="*" />
+                <RowDefinition x:Name="FooterRowHeight" Height="34" />
             </Grid.RowDefinitions>
-            <!-- Il blur è quello del desktop/DWM. Il gradiente aggiunge solo la tinta del vetro. -->
+
+            <!-- Riflesso di luce superiore stile Apple Glass -->
             <Border x:Name="Glass" Grid.RowSpan="3" CornerRadius="17" IsHitTestVisible="False">
                 <Border.Background>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0.8,1">
-                        <GradientStop Color="#0CFFFFFF" Offset="0" />
-                        <GradientStop Color="#00FFFFFF" Offset="0.55" />
-                        <GradientStop Color="#06000000" Offset="1" />
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#10FFFFFF" Offset="0" />
+                        <GradientStop Color="#03FFFFFF" Offset="0.16" />
+                        <GradientStop Color="#00000000" Offset="0.45" />
                     </LinearGradientBrush>
                 </Border.Background>
             </Border>
 
-            <Grid x:Name="HandleRow" Margin="16,0,12,0" Background="Transparent">
+            <!-- Riga Intestazione / Maniglia comandi -->
+            <Grid x:Name="HandleRow" Margin="16,0,10,0" Background="Transparent">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
                 <Grid Margin="0,0,8,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="22" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="#F58B73"
-                             HorizontalAlignment="Left" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock x:Name="StatusLabel" FontSize="12" FontWeight="SemiBold"
+                    <!-- Spia di stato con micro-alone -->
+                    <Grid Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#10B981"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="2,0,0,0">
+                        <TextBlock x:Name="StatusLabel" FontSize="12.5" FontWeight="SemiBold"
                                    Foreground="{DynamicResource BarPrimary}" Text="Pronto"
                                    TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="SpeakerHintText" FontSize="10" TextTrimming="CharacterEllipsis"
+                        <TextBlock x:Name="SpeakerHintText" FontSize="10.5" TextTrimming="CharacterEllipsis"
                                    Foreground="{DynamicResource BarMuted}" />
                     </StackPanel>
                 </Grid>
-                <!-- I comandi restano raggiungibili con mouse e tastiera, anche senza hover. -->
+
+                <!-- Barra comandi a pillola -->
                 <StackPanel Grid.Column="1" x:Name="ControlsPanel" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="SystemButton" Style="{StaticResource GlassButton}" Click="OnSystemClicked"
                             AutomationProperties.Name="Audio di sistema" ToolTip="Audio di sistema">
@@ -166,22 +202,23 @@
                             AutomationProperties.Name="Distingui i parlanti" ToolTip="Conversazione">
                         <ui:SymbolIcon Symbol="People24" FontSize="15" />
                     </Button>
-                    <Border Width="1" Height="16" Background="#20FFFFFF" Margin="10,0,7,0" />
+                    <Border Width="1" Height="16" Background="#22FFFFFF" Margin="6,0,8,0" />
                     <Button x:Name="PrimaryButton" Style="{StaticResource PrimaryButton}" Click="OnStartStopClicked"
                             AutomationProperties.Name="Avvia o ferma la trascrizione" ToolTip="Avvia la sessione">
-                        <ui:SymbolIcon x:Name="PrimaryIcon" Symbol="Play24" FontSize="16" />
+                        <ui:SymbolIcon x:Name="PrimaryIcon" Symbol="Play24" FontSize="15" />
                     </Button>
                 </StackPanel>
             </Grid>
 
+            <!-- Corpo trascrizioni: card conversazionali moderne ad alto contrasto -->
             <Grid Grid.Row="1" x:Name="TranscriptBody" Margin="0,0,0,6">
-                <ScrollViewer x:Name="Scroller" Margin="8,0" Focusable="False"
+                <ScrollViewer x:Name="Scroller" Margin="10,0" Focusable="False"
                               VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"
                               PanningMode="VerticalOnly">
                     <ItemsControl x:Name="CueList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border x:Name="Row" Height="76" CornerRadius="12" Margin="0,0,0,4" Padding="13,8"
+                                <Border x:Name="Row" CornerRadius="10" Margin="0,0,0,5" Padding="12,8"
                                         Background="{Binding RowBackground}"
                                         BorderThickness="1" BorderBrush="{Binding RowEdge}">
                                     <Grid>
@@ -189,27 +226,40 @@
                                             <ColumnDefinition Width="3" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <Border CornerRadius="1.5" Background="{Binding BadgeForeground}" Opacity="0.9"
-                                                Margin="0,4,0,4" />
-                                        <Grid Grid.Column="1" Margin="12,0,0,0">
+                                        <!-- Indicatore laterale a pillola colorata del parlante -->
+                                        <Border CornerRadius="1.5" Background="{Binding BadgeForeground}"
+                                                Width="3" HorizontalAlignment="Left" VerticalAlignment="Stretch" Margin="0,2,0,2"
+                                                Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}" />
+                                        <Grid Grid.Column="1" Margin="10,0,0,0">
                                             <Grid.RowDefinitions>
-                                                <RowDefinition Height="18" />
+                                                <RowDefinition Height="Auto" />
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
-                                            <Grid>
+                                            <!-- Intestazione: Badge parlante e testo originale ad alto contrasto -->
+                                            <Grid Margin="0,0,0,3">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding SpeakerLabel}" Foreground="{Binding BadgeForeground}"
-                                                           FontSize="10.5" FontWeight="SemiBold" Margin="0,0,10,0"
-                                                           Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding Original}" FontSize="11.5"
-                                                           TextTrimming="CharacterEllipsis" Foreground="{DynamicResource BarSecondary}"
+                                                <!-- Pillola parlante stile Raycast -->
+                                                <Border Background="{Binding BadgeBackground}" CornerRadius="5"
+                                                        Padding="6,1.5" Margin="0,0,8,0"
+                                                        BorderBrush="{Binding BadgeForeground}" BorderThickness="0.5"
+                                                        Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="{Binding SpeakerLabel}" Foreground="{Binding BadgeForeground}"
+                                                               FontSize="{Binding SecondaryFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                </Border>
+                                                <TextBlock Grid.Column="1" Text="{Binding Original}"
+                                                           FontSize="{Binding SecondaryFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource BarSecondary}"
                                                            Visibility="{Binding HasOriginal, Converter={StaticResource BoolToVisibility}}" />
                                             </Grid>
-                                            <TextBlock Grid.Row="1" FontSize="15" FontWeight="Medium" LineHeight="20"
-                                                       LineStackingStrategy="BlockLineHeight" MaxHeight="40"
+                                            <!-- Testo principale tradotto/trascritto: BIANCO PURO con font size dinamico -->
+                                            <TextBlock Grid.Row="1"
+                                                       FontSize="{Binding BarFontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                       FontWeight="SemiBold"
                                                        TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
                                                        Visibility="{Binding HasMain, Converter={StaticResource BoolToVisibility}}">
                                                 <Run Text="{Binding Main, Mode=OneWay}" Foreground="{Binding MainBrush, Mode=OneWay}" /><Run Text="{Binding Trail, Mode=OneWay}" Foreground="{Binding TrailBrush, Mode=OneWay}" />
@@ -223,25 +273,37 @@
                 </ScrollViewer>
                 <StackPanel x:Name="IdlePanel" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <TextBlock x:Name="IdleHint" Text="Premi Avvia per i sottotitoli" FontSize="13"
-                               Foreground="{DynamicResource BarSecondary}" />
+                               FontWeight="Medium" Foreground="{DynamicResource BarSecondary}" />
                 </StackPanel>
             </Grid>
 
-            <Border x:Name="Footer" Grid.Row="2" BorderBrush="#16FFFFFF" BorderThickness="0,1,0,0" Padding="14,0,8,0">
+            <!-- Piè di pagina con chip stile macOS / Raycast -->
+            <Border x:Name="Footer" Grid.Row="2" BorderBrush="#14FFFFFF" BorderThickness="0,1,0,0" Padding="14,0,10,0">
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock x:Name="DirectionLabel" Text="IT → EN" FontSize="10.5" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource BarSecondary}" />
-                        <TextBlock x:Name="ModeLabel" Text=" · Traduzione locale" FontSize="10.5"
-                                   Foreground="{DynamicResource BarMuted}" />
+                        <!-- Chip Direzione Lingua -->
+                        <Border Background="#20FFFFFF" BorderBrush="#28FFFFFF" BorderThickness="1"
+                                CornerRadius="5" Padding="7,2" Margin="0,0,8,0">
+                            <TextBlock x:Name="DirectionLabel" Text="IT → EN" FontSize="10.5" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BarPrimary}" />
+                        </Border>
+                        <TextBlock x:Name="ModeLabel" Text="· Traduzione locale" FontSize="10.5"
+                                   Foreground="{DynamicResource BarMuted}" VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Ctrl Alt B" FontSize="10" Foreground="{DynamicResource BarMuted}"
-                                   VerticalAlignment="Center" Margin="0,0,7,0" />
-                        <Button x:Name="MoreButton" Style="{StaticResource GlassButton}" Height="24"
+                        <!-- Keycap chip Raycast -->
+                        <Border Background="#1AFFFFFF" BorderBrush="#22FFFFFF" BorderThickness="1"
+                                CornerRadius="4" Padding="5,2" Margin="0,0,8,0" VerticalAlignment="Center">
+                            <TextBlock Text="Ctrl Alt B" FontSize="9.5" FontWeight="Medium"
+                                       Foreground="{DynamicResource BarSecondary}" />
+                        </Border>
+                        <Button x:Name="MoreButton" Style="{StaticResource GlassButton}" Height="26" Width="26"
                                 Click="OnMoreClicked" AutomationProperties.Name="Altri comandi" ToolTip="Altri comandi">
-                            <ui:SymbolIcon Symbol="MoreHorizontal24" FontSize="15" />
+                            <ui:SymbolIcon Symbol="MoreHorizontal24" FontSize="14" />
                             <Button.ContextMenu>
                                 <ContextMenu>
                                     <MenuItem Header="Cambia direzione" Click="OnSwapClicked" />
@@ -256,34 +318,33 @@
                                 </ContextMenu>
                             </Button.ContextMenu>
                         </Button>
-                        <Button Style="{StaticResource GlassButton}" Height="24" Click="OnHideClicked"
+                        <Button Style="{StaticResource GlassButton}" Height="26" Width="26" Click="OnHideClicked"
                                 AutomationProperties.Name="Nascondi barra" ToolTip="Nascondi barra · Ctrl+Alt+B">
-                            <ui:SymbolIcon Symbol="Dismiss24" FontSize="12" />
+                            <ui:SymbolIcon Symbol="Dismiss24" FontSize="11" />
                         </Button>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Modalità minimal: pillola in alto con puntini, prompt e play all'hover. -->
+            <!-- Modalità minimal: capsula Dynamic Island con onde luminose -->
             <Grid x:Name="MiniPanel" Grid.RowSpan="3" Background="Transparent" Visibility="Collapsed">
                 <StackPanel x:Name="MiniDots" Orientation="Horizontal"
                             HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
-                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
-                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
-                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
-                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
-                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                    <Ellipse Width="4" Height="4" Fill="#10B981" Margin="3,0" />
+                    <Ellipse Width="4" Height="4" Fill="#34D399" Margin="3,0" />
+                    <Ellipse Width="5" Height="5" Fill="#6EE7B7" Margin="3,0" />
+                    <Ellipse Width="4" Height="4" Fill="#34D399" Margin="3,0" />
+                    <Ellipse Width="4" Height="4" Fill="#10B981" Margin="3,0" />
                 </StackPanel>
                 <StackPanel x:Name="MiniPrompt" Orientation="Horizontal" Visibility="Collapsed"
                             HorizontalAlignment="Center" VerticalAlignment="Center">
                     <TextBlock x:Name="MiniPromptText" Text="Premi Avvia per i sottotitoli"
-                               FontSize="13" VerticalAlignment="Center"
+                               FontSize="12.5" FontWeight="Medium" VerticalAlignment="Center"
                                Foreground="{DynamicResource BarSecondary}" />
                     <Button x:Name="MiniPrimaryButton" Style="{StaticResource PrimaryButton}"
-                            Margin="10,0,0,0" Click="OnStartStopClicked"
+                            Width="28" Height="26" Margin="10,0,0,0" Click="OnStartStopClicked"
                             AutomationProperties.Name="Avvia o ferma la trascrizione">
-                        <ui:SymbolIcon x:Name="MiniPrimaryIcon" Symbol="Play24" FontSize="14" />
+                        <ui:SymbolIcon x:Name="MiniPrimaryIcon" Symbol="Play24" FontSize="13" />
                     </Button>
                 </StackPanel>
             </Grid>

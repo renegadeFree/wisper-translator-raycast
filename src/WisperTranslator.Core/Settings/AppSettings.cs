@@ -115,6 +115,9 @@ public sealed class AppSettings
     /// <summary>Opacità del vetro (0,55–0,92): più bassa, più acrilico si vede dietro la barra.</summary>
     public double BarOpacity { get; set; } = 0.72;
 
+    /// <summary>Dimensione carattere della barra fluttuante (12–28 pt).</summary>
+    public double BarFontSize { get; set; } = 15;
+
     /// <summary>Quante frasi tenere in memoria nella barra (3–8).</summary>
     public int BarBuffer { get; set; } = 5;
 
@@ -220,6 +223,7 @@ public sealed class AppSettings
         BarOpacity = BarGeometry.ClampOpacity(BarOpacity);
         BarRows = Math.Clamp(BarRows, 1, BarGeometry.MaxRows);
         BarBuffer = Math.Clamp(BarBuffer, 3, 8);
+        BarFontSize = double.IsFinite(BarFontSize) ? Math.Clamp(BarFontSize, 12, 28) : 15;
         if (!Enum.IsDefined(BarText)) BarText = BarTextMode.Entrambi;
         FontSize = double.IsFinite(FontSize) ? Math.Clamp(FontSize, 10, 48) : 16;
         OverlayFontSize = double.IsFinite(OverlayFontSize) ? Math.Clamp(OverlayFontSize, 12, 96) : 30;

@@ -38,7 +38,7 @@ public sealed record BarState(
 /// disegnati e l'acrilico di Windows riempie esattamente quella forma. Non possiede la sessione:
 /// la comanda il pannello.
 /// </summary>
-public partial class BarWindow : Window
+public partial class BarWindow : Window, INotifyPropertyChanged
 {
     private const double SnapDistance = 16;
     private const int WmSize = 0x0005;
@@ -47,11 +47,13 @@ public partial class BarWindow : Window
     private const int WmDpiChanged = 0x02E0;
     private const int HtTransparent = -1;
 
-    private static readonly Color Coral = Color.FromRgb(0xFF, 0x7A, 0x59);
-    private static readonly Color StopColor = Color.FromRgb(0xFF, 0x5A, 0x5A);
-    private static readonly Color RowColor = Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF);
+    private static readonly Color Coral = Color.FromRgb(0xFB, 0x92, 0x3C);
+    private static readonly Color StopColor = Color.FromRgb(0xEF, 0x44, 0x44);
+    private static readonly Color GreenActive = Color.FromRgb(0x10, 0xB9, 0x81);
+    private static readonly Color RowColor = Color.FromArgb(0xF2, 0x18, 0x18, 0x22);
     private static readonly Brush CoralBrush = Freeze(new SolidColorBrush(Coral));
     private static readonly Brush StopBrush = Freeze(new SolidColorBrush(StopColor));
+    private static readonly Brush GreenActiveBrush = Freeze(new SolidColorBrush(GreenActive));
     private static readonly Brush RowBrush = Freeze(new SolidColorBrush(RowColor));
 
     private readonly AppSettings _settings;
@@ -75,9 +77,21 @@ public partial class BarWindow : Window
     private bool _running;
     private bool _hasCues;
     private bool _acrylic;
-    private static readonly Brush TextBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF6)));
-    private static readonly Brush MutedBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xB4, 0xB4, 0xC2)));
-    private static readonly Brush OffBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x86)));
+    private static readonly Brush TextBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF)));
+    private static readonly Brush MutedBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xCB, 0xD5, 0xE1)));
+    private static readonly Brush OffBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x94, 0xA3, 0xB8)));
+
+    public double BarFontSize => _settings.BarFontSize;
+    public double SecondaryFontSize => Math.Max(10, Math.Round(_settings.BarFontSize * 0.78));
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void NotifyFontSizeChanged()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BarFontSize)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SecondaryFontSize)));
+        foreach (var row in _rows) row.RefreshColors();
+    }
 
     public BarWindow(AppSettings settings)
     {
@@ -200,13 +214,14 @@ public partial class BarWindow : Window
         UpdateMiniVisual();
         ApplyOpacity();
         ApplyShellClip();
+        NotifyFontSizeChanged();
     }
 
     /// <summary>Altezza massima reale: il 70% dell'area di lavoro, mai sotto il minimo.</summary>
     private static double MaxHeightForWorkArea(double height) =>
         Math.Min(height, BarGeometry.MaxHeightFor(SystemParameters.WorkArea.Height));
 
-    /// <summary>La tinta del vetro segue lo slider: più bassa, più acrilico si vede dietro.</summary>
+    /// <summary>La tinta del vetro segue lo slider: dark obsidian quasi solido (95%-99%) per massimo contrasto.</summary>
     private void ApplyOpacity()
     {
         if (_shot) return;
@@ -216,10 +231,10 @@ public partial class BarWindow : Window
             return;
         }
 
-        // Con il vetro attivo il pannello è solo un velo: la tinta la porta l'acrilico.
-        var veil = _acrylic ? BarGeometry.PanelVeil(_settings.BarOpacity) : 0.96;
-        var alpha = (byte)Math.Round(veil * 255);
-        Shell.Background = Freeze(new SolidColorBrush(Color.FromArgb(alpha, 0x18, 0x18, 0x21)));
+        // Vetro dark obsidian Raycast: quasi solido (95%-99% opacità) per massimo contrasto e zero trasparenza sbiadita
+        var opacity = BarGeometry.ClampOpacity(_settings.BarOpacity);
+        var alpha = (byte)Math.Clamp(Math.Round((0.94 + (opacity * 0.05)) * 255), 242, 255);
+        Shell.Background = Freeze(new SolidColorBrush(Color.FromArgb(alpha, 0x11, 0x11, 0x16)));
     }
 
     private void ClampToWorkArea()
@@ -264,12 +279,9 @@ public partial class BarWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        // Il tema dell'applicazione può ripristinare lo stile con cornice durante l'inizializzazione.
         WindowStyle = WindowStyle.None;
         Win32.MakeFloatingBar(this);
         _source = HwndSource.FromHwnd(Win32.Handle(this));
-        // Senza questo WPF dipinge il proprio rettangolo opaco e il vetro di Windows non si vede:
-        // è il pezzo che permette a un acrilico "di sistema" di comparire in una finestra normale.
         if (_source?.CompositionTarget is not null)
         {
             _source.CompositionTarget.BackgroundColor = Colors.Transparent;
@@ -304,24 +316,14 @@ public partial class BarWindow : Window
         }
         catch (System.Security.SecurityException) { transparent = false; }
 
-        // Vetro di Windows: acrilico sfocato + angoli arrotondati della finestra, così il
-        // materiale non può più disegnare il rettangolo attorno al pannello.
-        var tint = (byte)Math.Round(BarGeometry.AcrylicTint(_settings.BarOpacity) * 255);
-        _acrylic = transparent && Win32.ApplyAcrylicBackdrop(this, tint, 0x18, 0x18, 0x21);
-        if (!_acrylic)
-        {
-            Win32.ClearAcrylicBackdrop(this);
-        }
+        _acrylic = transparent;
 
         if (SystemParameters.HighContrast) Shell.Background = SystemColors.WindowBrush;
-        else if (!_acrylic) Shell.Background = Freeze(new SolidColorBrush(Color.FromRgb(0x18, 0x18, 0x21)));
         else ApplyOpacity();
         Glass.Opacity = SystemParameters.HighContrast ? 0 : 1;
         Resources["BarPrimary"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : TextBrush;
-        Resources["BarSecondary"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush
-            : Freeze(new SolidColorBrush(Color.FromRgb(0xB4, 0xB4, 0xC2)));
-        Resources["BarMuted"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush
-            : Freeze(new SolidColorBrush(Color.FromRgb(0x92, 0x92, 0xA3)));
+        Resources["BarSecondary"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : MutedBrush;
+        Resources["BarMuted"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : OffBrush;
         foreach (var row in _rows) row.RefreshColors();
         Win32.MakeFloatingBar(this);
         ApplyShellClip();
@@ -335,7 +337,7 @@ public partial class BarWindow : Window
     {
         _shot = true;
         _pulseTimer.Stop();
-        Shell.Background = new SolidColorBrush(Color.FromRgb(0x0E, 0x0E, 0x12));
+        Shell.Background = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x19));
         Glass.Opacity = 0;
         ControlsPanel.Opacity = 1;
 
@@ -407,7 +409,8 @@ public partial class BarWindow : Window
         SpeakerHintText.Text = state.SpeakerHint;
         IdlePanel.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
         IdleHint.Text = state.Running ? "In ascolto…" : "Premi Avvia per i sottotitoli";
-        StatusDot.Opacity = state.Running ? 1 : 0.45;
+        StatusDot.Fill = state.Running ? GreenActiveBrush : OffBrush;
+        StatusDot.Opacity = state.Running ? 1.0 : 0.45;
 
         PrimaryIcon.Symbol = state.Running ? SymbolRegular.Stop24 : SymbolRegular.Play24;
         PrimaryButton.Background = state.Running ? StopBrush : CoralBrush;
@@ -442,11 +445,7 @@ public partial class BarWindow : Window
     private sealed class CueView : INotifyPropertyChanged
     {
         private static readonly Dictionary<int, (Brush Background, Brush Foreground, Brush Row)> SpeakerBrushes = [];
-        private static readonly Brush RowEdgeBrush = Freeze(new LinearGradientBrush(
-            Color.FromArgb(0x1E, 0xFF, 0xFF, 0xFF),
-            Color.FromArgb(0x06, 0xFF, 0xFF, 0xFF),
-            new Point(0, 0),
-            new Point(0, 1)));
+        private static readonly Brush RowEdgeBrush = Freeze(new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)));
         private Brush _rowBackground = RowBrush;
         private Cue? _cue;
         private BarTextMode _mode;
@@ -514,13 +513,9 @@ public partial class BarWindow : Window
 
             var color = (Color)ColorConverter.ConvertFromString(Speakers.Color(key));
             brushes = (
-                Freeze(new SolidColorBrush(Color.FromArgb(0x22, color.R, color.G, color.B))),
+                Freeze(new SolidColorBrush(Color.FromArgb(0x35, color.R, color.G, color.B))),
                 Freeze(new SolidColorBrush(color)),
-                Freeze(new LinearGradientBrush(
-                    Color.FromArgb(0x1F, color.R, color.G, color.B),
-                    Color.FromArgb(0x0A, color.R, color.G, color.B),
-                    new Point(0, 0),
-                    new Point(0, 1))));
+                Freeze(new SolidColorBrush(Color.FromArgb(0xF2, 0x18, 0x18, 0x22))));
             SpeakerBrushes[key] = brushes;
             return brushes;
         }
@@ -651,6 +646,24 @@ public partial class BarWindow : Window
         }
     }
 
+    protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
+    {
+        base.OnPreviewMouseWheel(e);
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            var delta = e.Delta > 0 ? 1 : -1;
+            var newSize = Math.Clamp(_settings.BarFontSize + delta, 12, 28);
+            if (Math.Abs(newSize - _settings.BarFontSize) > 0.1)
+            {
+                _settings.BarFontSize = newSize;
+                if (!_shot) _settings.Save();
+                NotifyFontSizeChanged();
+            }
+
+            e.Handled = true;
+        }
+    }
+
     /// <summary>
     /// Quanti pixel di schermo vale un punto della finestra: <c>PointToScreen</c> cambia unità
     /// con il DPI, e senza questa calibrazione il trascinamento andrebbe a metà velocità.
@@ -732,7 +745,11 @@ public partial class BarWindow : Window
                 return true;
             }
 
-            current = VisualTreeHelper.GetParent(current);
+            // Il testo dei sottotitoli è fatto di Run, che sono ContentElement e non Visual:
+            // VisualTreeHelper su di loro solleva un'eccezione (un clic sul testo falliva).
+            current = current is Visual
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
         }
 
         return false;
@@ -748,13 +765,13 @@ public partial class BarWindow : Window
         }
 
         Shell.RenderTransformOrigin = new Point(0.5, 0.5);
-        var scale = new ScaleTransform(0.985, 0.985);
+        var scale = new ScaleTransform(0.96, 0.96);
         Shell.RenderTransform = scale;
 
         var storyboard = new Storyboard();
-        storyboard.Children.Add(Animation(Shell, UIElement.OpacityProperty, 0, 1, 0.24, spring: false));
-        storyboard.Children.Add(Animation(scale, ScaleTransform.ScaleXProperty, 0.985, 1, 0.2, spring: true));
-        storyboard.Children.Add(Animation(scale, ScaleTransform.ScaleYProperty, 0.985, 1, 0.2, spring: true));
+        storyboard.Children.Add(Animation(Shell, UIElement.OpacityProperty, 0, 1, 0.20, spring: false));
+        storyboard.Children.Add(Animation(scale, ScaleTransform.ScaleXProperty, 0.96, 1, 0.22, spring: true));
+        storyboard.Children.Add(Animation(scale, ScaleTransform.ScaleYProperty, 0.96, 1, 0.22, spring: true));
         storyboard.Begin();
     }
 
@@ -767,12 +784,12 @@ public partial class BarWindow : Window
 
         Scroller.ScrollToTop();
         var list = CueList;
-        var transform = new TranslateTransform(0, -4);
+        var transform = new TranslateTransform(0, 8);
         list.RenderTransform = transform;
 
         var storyboard = new Storyboard();
-        storyboard.Children.Add(Animation(list, UIElement.OpacityProperty, 0.4, 1, 0.22, spring: false));
-        storyboard.Children.Add(Animation(transform, TranslateTransform.YProperty, -4, 0, 0.18, spring: true));
+        storyboard.Children.Add(Animation(list, UIElement.OpacityProperty, 0.35, 1, 0.20, spring: false));
+        storyboard.Children.Add(Animation(transform, TranslateTransform.YProperty, 8, 0, 0.22, spring: true));
         storyboard.Begin();
     }
 

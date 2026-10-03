@@ -172,6 +172,7 @@ public partial class SettingsWindow : FluentWindow
         BarHeightRow.Value = Core.Settings.BarGeometry.ClampHeight(_settings.BarHeight);
         BarOpacityRow.Value = Core.Settings.BarGeometry.ClampOpacity(_settings.BarOpacity);
         BarBufferRow.Value = _settings.BarBuffer;
+        BarFontRow.Value = _settings.BarFontSize;
 
         BarTextBox.ItemsSource = new[] { "Originale e traduzione", "Solo originale", "Solo traduzione" };
         BarTextBox.SelectedIndex = (int)_settings.BarText;
@@ -215,6 +216,7 @@ public partial class SettingsWindow : FluentWindow
         _settings.BarWidth = Core.Settings.BarGeometry.ClampWidth(BarWidthRow.Value);
         _settings.BarOpacity = Core.Settings.BarGeometry.ClampOpacity(BarOpacityRow.Value);
         _settings.BarBuffer = Math.Max((int)Math.Round(BarBufferRow.Value), _settings.BarRows);
+        _settings.BarFontSize = BarFontRow.Value;
         _settings.BarText = (BarTextMode)Math.Clamp(BarTextBox.SelectedIndex, 0, 2);
 
         RefreshBarPreview();

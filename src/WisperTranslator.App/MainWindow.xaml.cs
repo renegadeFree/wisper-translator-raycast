@@ -507,6 +507,32 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>
+    /// Anteprima di sviluppo (<c>--bar-preview</c>): barra a schermo con frasi d'esempio e
+    /// vetro vero, senza sessione e senza toccare le impostazioni. Serve a guardare stile e
+    /// misure mentre si modificano i file; si chiude dall'icona nella barra delle applicazioni.
+    /// </summary>
+    internal void ShowBarPreview()
+    {
+        _shotMode = true;
+        _shotRunning = true;
+        _cues.Clear();
+        foreach (var sample in Core.Session.BarSamples.Cues())
+        {
+            _cues.Add(sample);
+        }
+
+        ShowBar();
+        if (_bar is null)
+        {
+            return;
+        }
+
+        SetStatus("Anteprima barra");
+        RefreshBar();
+        Hide();
+    }
+
     private void ToggleBar()
     {
         if (_bar is { IsVisible: true })

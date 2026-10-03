@@ -39,17 +39,15 @@ public static class BarGeometry
     /// <summary>Capsula minimal: sta in alto come una voce di launcher e non copre nulla.</summary>
     public const double MiniWidth = 320;
     public const double MiniHeight = 48;
-    public const double MiniRadius = 8;
+    public const double MiniRadius = 18;
 
     /// <summary>Righe visibili al massimo: oltre, la barra coprirebbe mezzo schermo.</summary>
     public const int MaxRows = 5;
 
     /// <summary>
-    /// Angoli del pannello di vetro. Deve valere quanto il raggio che DWM dà alla finestra
-    /// (8 DIP a qualsiasi DPI): è DWM a ritagliare il vetro, e un raggio più grande lascerebbe
-    /// scoperti quattro spicchi di acrilico proprio sugli angoli.
+    /// Angoli del pannello di vetro in stile Raycast / Apple (18 DIP).
     /// </summary>
-    public const double CornerRadiusValue = 8;
+    public const double CornerRadiusValue = 18;
 
     /// <summary>Riga comandi in alto (equalizzatore, stato, pulsante principale).</summary>
     public const double HandleHeight = 48;

@@ -65,6 +65,13 @@ public partial class App : Application
             window.ShowOverlay();
         }
 
+        // Anteprima di sviluppo: barra a schermo con frasi d'esempio, per guardare stile e
+        // misure mentre si modificano i file (vedi docs/BUILD_WINDOWS.md).
+        if (e.Args.Contains("--bar-preview", StringComparer.OrdinalIgnoreCase))
+        {
+            window.ShowBarPreview();
+        }
+
         // Screenshot per la documentazione: solo finestre dell'app, su sfondo neutro.
         // --shot=<cartella> oppure --shot (exports\screenshots).
         var shot = e.Args.FirstOrDefault(arg => arg.StartsWith("--shot", StringComparison.OrdinalIgnoreCase));

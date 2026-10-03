@@ -185,6 +185,9 @@
                         <controls:SliderRow x:Name="BarRowsRow" Label="Frasi visibili" Margin="0,14,0,0"
                                             Minimum="1" Maximum="5" TickFrequency="1"
                                             ValueFormat="{}{0:0}" ValueChanged="OnBarChanged" />
+                        <controls:SliderRow x:Name="BarFontRow" Label="Dimensione testo barra" Margin="0,12,0,0"
+                                            Minimum="12" Maximum="26" TickFrequency="1"
+                                            ValueFormat="{}{0:0} pt" ValueChanged="OnBarChanged" />
                         <controls:SliderRow x:Name="BarWidthRow" Label="Larghezza barra" Margin="0,12,0,0"
                                             Minimum="480" Maximum="1600" TickFrequency="20"
                                             ValueFormat="{}{0:0} px" ValueChanged="OnBarChanged" />
