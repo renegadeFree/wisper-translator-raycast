@@ -13,6 +13,38 @@ public class ModelStoreTests : IDisposable
 
     public ModelStoreTests() => Directory.CreateDirectory(_directory);
 
+    /// <summary>
+    /// I motori di rifinitura ONNX sono multi-file: il catalogo deve descrivere ogni file con
+    /// dimensione e hash, altrimenti lo scaricamento non è verificabile.
+    /// </summary>
+    [Fact]
+    public void IModelliOnnxSonoDescrittiFilePerFile()
+    {
+        foreach (var entry in new[] { ModelCatalog.OpusMtItalianEnglish, ModelCatalog.OpusMtEnglishItalian })
+        {
+            Assert.Equal(ModelPackaging.Files, entry.Packaging);
+            Assert.NotNull(entry.Files);
+            Assert.Equal(5, entry.Files!.Count);
+            Assert.All(entry.Files, file =>
+            {
+                Assert.StartsWith("https://huggingface.co/", file.Url, StringComparison.Ordinal);
+                Assert.True(file.SizeBytes > 0);
+                Assert.Equal(64, file.Sha256.Length);
+            });
+            Assert.Equal(entry.Files.Sum(file => file.SizeBytes), entry.ExpectedSizeBytes);
+            Assert.Contains(entry.Files, file =>
+                file.RelativePath.EndsWith("encoder_model_int8.onnx", StringComparison.Ordinal));
+            Assert.Contains(entry.Files, file =>
+                file.RelativePath.EndsWith("decoder_model_merged_int8.onnx", StringComparison.Ordinal));
+        }
+
+        // Le due direzioni vivono in cartelle distinte sotto models\mt\onnx.
+        Assert.Contains("onnx", ModelStore.PathFor(ModelCatalog.OpusMtItalianEnglish), StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(
+            ModelStore.PathFor(ModelCatalog.OpusMtItalianEnglish),
+            ModelStore.PathFor(ModelCatalog.OpusMtEnglishItalian));
+    }
+
     [Fact]
     public async Task AccettaUnFileCorrispondenteAlCatalogo()
     {

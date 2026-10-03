@@ -1201,6 +1201,187 @@ mostrata solo su comando, verifica di tutte le funzionalità e prove con 3/4 per
 | F31.7 | Documentazione | `README.md`, `docs/CONVERSAZIONE.md`, `docs/BENCHMARKS.md`, screenshot rigenerati; `PLAN.md` aggiornato |
 | F31.8 | Release | commit su `main`, tag e release **v2.2.0** con installer e note |
 
+---
+
+## 17. Lavorazione Raycast — barra SuperCmd finale e parziali progressivi (F32–F33)
+
+Richiesta dell'utente (2026-10-03): la barra deve apparire come `docs/bar-preview.html`, senza
+finestra Windows e con una modalità minimal a pillola quando non ci sono sottotitoli; i parziali
+NeMo non devono più mostrare una parola alla volta, ma comporre la frase in modo progressivo.
+
+### F32 — Barra finale, senza cornice e modalità minimal (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F32.1 | `Win32.MakeFloatingBar` rimuove a livello nativo caption, thick frame, bordo, dialog frame, sysmenu e pulsanti min/max; imposta `WS_POPUP` + tool window e riapplica `SWP_FRAMECHANGED`. La rimozione viene ripetuta su attivazione, disattivazione, cambio backdrop, DPI e dimensione | ✅ |
+| F32.2 | Acrilico DWM live su Windows 11 con fallback Win10; regione arrotondata riapplicata dopo ogni cambio di materiale o dimensione; nessuna ombra disegnata | ✅ |
+| F32.3 | `Shell` ha `Clip` arrotondato su `SizeChanged` e `ClipToBounds`: footer e scroller non sbordano più dagli angoli | ✅ |
+| F32.4 | Card completa portata ai token dell'anteprima HTML: 760 DIP, altezza 246, raggio 18, sfondo `#181821A6`, gradiente `#0CFFFFFF → trasparente 55% → #06000000`, bordo `#35FFFFFF`, righe 76, footer 32 | ✅ |
+| F32.5 | Pulsante primario dedicato: riposo `#FF7A59`, ascolto `#FF5A5A`, hover `#FF7777`; gli altri pulsanti usano hover/attivo/spento coerenti con l'anteprima | ✅ |
+| F32.6 | Modalità minimal: pillola 320×48, raggio 24, puntini `#8A8A8E`; all'hover compaiono prompt “Premi Avvia per i sottotitoli” e play; in ascolto senza testo restano puntini animati e stop | ✅ |
+| F32.7 | La pillola si trascina, un clic senza trascinamento avvia o ferma, il passaggio alla card completa e ritorno avviene al primo cue/fine cue mantenendo centro X e bordo superiore | ✅ |
+| F32.8 | Nuova impostazione `BarMiniIdle` (default `true`) nella scheda Barra | ✅ |
+| F32.9 | Autotest esteso: pillola e card senza cornice, regione `COMPLEXREGION`, clip attivo. Esito reale: **PASS**, pillola 320×48 e card completa 760×246 | ✅ |
+| F32.10 | Screenshot: `barra-ascolto.png`, `barra-cue-ferma.png`, `barra-riposo.png`, `barra-mini-ascolto.png` rigenerati dai soli elementi WPF | ✅ |
+
+### F33 — Parziali progressivi e accumulo delta WebSocket (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F33.1 | Nuovo `StreamingTextAccumulator`: compone i delta in una frase, riconosce spazio iniziale come inizio parola, concatena i sottotoken, evita duplicati e sostituisce il testo sugli eventi completati | ✅ |
+| F33.2 | `NeMoRealtimeClient` trasmette il delta grezzo, senza `Trim`, così lo spazio iniziale di NeMo resta il segnale di confine di parola | ✅ |
+| F33.3 | `RealtimeTranscriber` azzera l'accumulatore a ogni nuovo enunciato, riavvio WebSocket, cambio lingua o errore, e pubblica sempre la frase accumulata come parziale | ✅ |
+| F33.4 | La corsia finale batch resta l'autorità: sostituisce il parziale con la frase completa ben formattata, senza cambiare la logica di traduzione progressiva, debounce o versioning | ✅ |
+| F33.5 | Verifica live reale: i parziali passano da `Good` → `Good mor` → `Good morning.` → `Good morning. This is a real time translation test` e il finale batch pubblica `Good morning. This is a real time translation test.` | ✅ |
+| F33.6 | Test: **108 verdi** (101 precedenti + 7 nuovi su accumulo, geometria e pillola) | ✅ |
+
+**Decisioni F32–F33:**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-41 | Rimuovere il frame a livello Win32 invece di affidarsi al solo `WindowStyle=None` | `FluentWindow` ripristina lo stile classico dopo l'inizializzazione: è la causa della cornice visibile |
+| D-42 | Acrilico DWM live senza ombra disegnata | Mantiene il blur in tempo reale e non introduce una seconda finestra o un fondo statico |
+| D-43 | Pillola minimal 320×48 invece della card vuota | Riduce l'ingombro a riposo, resta cliccabile e si espande solo quando arriva testo |
+| D-44 | Accumulare i delta nel `RealtimeTranscriber`, non nel client WebSocket | Il transcriber conosce i confini degli enunciati e può azzerare l'accumulatore al momento giusto |
+
+## 18. Lavorazione — traduzione istantanea a due corsie e barra ridimensionabile (F34–F36)
+
+Richiesta dell'utente (2026-10-03): la trascrizione è ormai istantanea, la **traduzione** no —
+aspetta la fine della frase. Inoltre dietro la barra si vedono **bordi squadrati** e la barra
+non si può ridimensionare.
+
+### F34 — Due corsie di traduzione (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F34.1 | Diagnosi misurata: MTranServer risponde in 17 ms su frase intera; il ritardo era la logica, che **annullava** la traduzione in corso a ogni parziale con 300 ms di debounce. Parlando di continuo nessuna traduzione arrivava a destinazione | ✅ |
+| F34.2 | Nuovo `CueTranslationLane`: una corsia rapida per battuta con politica **latest-wins senza annullamento**; il primo parziale si traduce subito, i successivi con debounce *trailing* di 120 ms | ✅ |
+| F34.3 | Corsia di qualità in parallelo: innesco a metà enunciato (≥8 parole nuove e ≥1,2 s dall'ultimo passaggio) e sempre a fine enunciato; una sola richiesta in volo | ✅ |
+| F34.4 | Il risultato rifinito non viene mai sovrascritto dalla versione approssimativa dello stesso testo: se la qualità ha già coperto una generazione, la corsia rapida tace | ✅ |
+| F34.5 | La rifinitura viene scartata solo se nel frattempo il parlato è corso avanti di oltre due parole: niente traduzioni visibilmente vecchie | ✅ |
+| F34.6 | `TranscriptionSession` usa le corsie al posto di `_pendingTranslations`/`_translationVersions`; le corsie si archiviano da sole quando il finale è tradotto e si chiudono tutte allo stop | ✅ |
+| F34.7 | Barra: testo non ancora tradotto in corallo, traduzione provvisoria in grigio chiaro, definitiva in bianco | ✅ |
+| F34.8 | Diagnostica: ogni traduzione pubblicata finisce nel JSONL di sessione con corsia (`rapida`/`qualità`), testo e traduzione | ✅ |
+
+### F35 — Secondo motore Marian ONNX (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F35.1 | `OnnxTranslationEngine` + `MarianOnnxModel`: encoder una volta, decoder merged autoregressivo con cache, ONNX Runtime già presente per il VAD | ✅ |
+| F35.2 | `MarianTokenizer` da `tokenizer.json`: Viterbi Unigram, normalizzazione minima, ricomposizione con spazi/punteggiatura | ✅ |
+| F35.3 | Modelli `Helsinki-NLP/opus-mt-it-en` e `opus-mt-en-it` (Apache-2.0) nelle conversioni ONNX int8 `Xenova/opus-mt-*`: encoder 58 MB + decoder 65 MB + tokenizer per direzione | ✅ |
+| F35.4 | Defect dell'export individuato e aggirato: il decoder merged restituisce cache **encoder** inutilizzabili (`[0,8,1,64]`) dal secondo passo; le cache incrociate restano quelle calcolate al primo passo, costanti per definizione | ✅ |
+| F35.5 | Catalogo modelli con nuovo `ModelPackaging.Files`: file per file, con dimensione e SHA-256, download verificato, stato, dimensione reale, scarica/verifica/elimina | ✅ |
+| F35.6 | Attivazione Auto/Spenta/Sempre nelle impostazioni (scheda Prestazioni) con avviso sullo stato dei modelli e pulsante di download (~270 MB per entrambe le direzioni) | ✅ |
+| F35.7 | Auto spegne la rifinitura su ≤4 core o <8 GB: su una macchina minima resta la sola corsia rapida, senza errori | ✅ |
+| F35.8 | Traduzione reale misurata in test: it→en 177 ms, en→it 227 ms su frase intera | ✅ |
+
+### F36 — Barra: niente fascia nera, ridimensionamento libero, vetro regolabile (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F36.1 | Diagnosi misurata sul campo: la finestra era 889×246 px ma il pannello di vetro 875×242 (offset 7 px laterale, 2 px verticale). La fascia scoperta la riempiva il backdrop di sistema, con angoli squadrati | ✅ |
+| F36.2 | Correzione: cornice WPF azzerata (`WindowChrome` a spessori 0, `ResizeMode=NoResize`), regione arrotondata calcolata da `GetWindowRect` e **vetro esteso a tutta l'area client** (`DwmExtendFrameIntoClientArea`) | ✅ |
+| F36.3 | Verifica strumentale: pannello 889×246 su finestra 889×246 (prima 875×242), bordo al pixel 0 e desktop visibile oltre gli angoli arrotondati; la pillola non ha più fascia | ✅ |
+| F36.4 | Ridimensionamento libero: bordi e angoli trascinabili (fascia 12 px), larghezza 480–1600 px, altezza 120 px–70% dell'area di lavoro, posizione ancorata al bordo opposto, misure salvate | ✅ |
+| F36.4b | La geometria del trascinamento è una funzione pura (`BarGeometry.Resize`/`EdgeAt`) con test dedicati: ancoraggio del lato opposto, limiti, area di lavoro, angoli. Verifica sul campo con trascinamento reale: larghezza 889→1017 px, altezza 246→316 px con il bordo superiore (bordo inferiore fermo) | ✅ |
+| F36.5 | `AppSettings.BarHeight` + `BarOpacity` (0,55–0,92, default 0,72) con slider e valori visibili (`246 px`, `72%`) nella scheda Barra; "Frasi visibili" esteso a 5 | ✅ |
+| F36.6 | Autotest esteso: `ShellFillsWindow` verifica che il pannello riempia la finestra, così la fascia non può tornare senza far fallire il test | ✅ |
+| F36.7 | Screenshot rigenerati (`--shot`) con la nuova geometria | ✅ |
+
+### Verifica sul campo (audio reale, clip italiana → inglese)
+
+Clip `clip-it.wav` riprodotta per tre volte con l'app in ascolto sull'audio di sistema, 6 enunciati:
+
+| Enunciato | Parziali ASR | Traduzioni rapide | Passaggi di qualità | Prima traduzione dal primo parziale |
+|---|---|---|---|---|
+| 2 | 15 | 16 | 1 | 11 ms |
+| 3 | 27 | 22 | 2 | 178 ms |
+| 4 | 15 | 14 | 2 | 1 ms |
+| 5 | 26 | 24 | 3 | 4 ms |
+| 6 | 16 | 15 | 0 | 4 ms |
+| 7 | 28 | 25 | 2 | 0 ms |
+
+Esempio di timeline (enunciato 5): `47.752 [rapida]` → `48.200 [rapida]` → `48.400 [rapida]` →
+`48.408 [qualità]` → `49.075 [rapida]` → `49.468 [qualità]`. La traduzione segue il parlato
+invece di aspettare la pausa, e la rifinitura di qualità chiude la frase.
+
+**Criteri di accettazione**
+
+| Criterio | Esito |
+|---|---|
+| Prima traduzione entro 300 ms dal primo parziale | ✅ 0–178 ms su 6/6 enunciati |
+| Traduzioni pubblicate ≈ parziali ASR (nessuna fame da annullamento) | ✅ 116 rapide su 135 righe di sessione |
+| Rifinitura di qualità a metà frase e a fine enunciato | ✅ 10 passaggi in 35 s |
+| Nessun errore applicativo durante la sessione | ✅ `errori.log` vuoto |
+| Test automatici | ✅ **123 verdi** (108 precedenti + 15 nuovi) |
+| Barra senza fascia squadrata e ridimensionabile | ✅ misura strumentale + autotest |
+
+**Decisioni F34–F36:**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-45 | Non annullare mai la traduzione in corso | Annullarla a ogni parziale era la causa del ritardo: la traduzione arrivava solo quando si smetteva di parlare |
+| D-46 | Due corsie con motori diversi invece di un motore solo più lento | Il parziale deve restare fulmineo: il modello grande lavora in parallelo, non al posto di quello rapido |
+| D-47 | Cache encoder di Marian congelate al primo passo | L'export ONNX le ricalcola in modo sbagliato; i valori sono costanti per tutta la frase |
+| D-48 | Rifinitura spenta da sola su ≤4 core o <8 GB | Su una macchina minima il secondo motore toglierebbe CPU all'ASR: meglio una traduzione approssimativa che una trascrizione in ritardo |
+| D-49 | Estendere il vetro a tutta l'area client invece di disegnare l'ombra | Il backdrop di sistema lasciava scoperti 7 px per lato: era quello la fascia squadrata dietro la barra |
+| D-50 | Ridimensionamento gestito in WPF invece del ciclo di sistema | Con `ResizeMode=NoResize` non esiste più la cornice WPF, che era la causa della fascia |
+| D-51 | Fascia di presa portata a 12 px (invece dei 6 iniziali) | Gli angoli arrotondati e la cornice estesa tolgono qualche pixel proprio sul bordo: con 6 px il trascinamento orizzontale risultava poco affidabile |
+
+## 19. Lavorazione — il bordo squadrato della barra, risolto per davvero (F37)
+
+Richiesta dell'utente (2026-10-03): la barra mostra ancora **un brutto bordo squadrato** attorno
+al pannello. "Dovrebbe avere uno stile Mica/vetro e invece ha questi bordi": serve capire perché
+e togliere anche i rettangoli delle righe con le frasi.
+
+### Diagnosi misurata
+
+Il difetto non era nel pannello ma **attorno**: il rettangolo grigio era il materiale di Windows
+che riempiva tutto l'HWND mentre il pannello disegnava il proprio rettangolo arrotondato sopra.
+
+| Prova | Esito |
+|---|---|
+| Barra su uno sfondo a strisce nette, cattura 1:1 con l'app in esecuzione | ✅ 9 px di materiale scoperto su ogni lato: gli **angoli esterni erano squadrati** |
+| Misura dentro il pannello: pixel identici sopra strisce di colore diverso | ✅ il vetro era attivo e sfocato: il difetto era la **forma**, non il materiale |
+| Prova con `SetWindowRgn` ristretto di 60 px | ✅ il **contenuto** veniva ritagliato dalla regione, il **materiale no**: si vedeva ancora il rettangolo |
+| Prova con acrilico "accent" su finestra normale + regione | ✅ stesso rettangolo |
+| Prova con finestra a strati (`AllowsTransparency=True`) + acrilico | ✅ niente rettangolo, ma testo senza ClearType e una superficie fantasma dopo il primo ridimensionamento |
+
+### Soluzione (ricetta presa da HWWidget, stesso autore)
+
+| # | Attività | Esito |
+|---|---|---|
+| F37.1 | Finestra **normale**, non a strati: `AllowsTransparency=False`, sfondo `#01000000` e `HwndSource.CompositionTarget.BackgroundColor = Transparent` | ✅ il vetro di Windows torna visibile senza finestra a strati |
+| F37.2 | **Angoli arrotondati di DWM** (`DWMWA_WINDOW_CORNER_PREFERENCE = ROUND`, `DWMWA_BORDER_COLOR = NONE`): è DWM a ritagliare il materiale, quindi la finestra non può mostrare spigoli | ✅ bordo squadrato eliminato: verificato a pixel su sfondo a strisce |
+| F37.3 | Materiale = acrilico dell'accent policy con `DWMWA_SYSTEMBACKDROP_TYPE = NONE` prima di applicarlo | ✅ resta sfocato anche **senza fuoco**, che è la condizione normale della barra (Mica/Acrylic di DWM diventano tinta unita) |
+| F37.4 | Raggio del pannello = raggio di DWM (**8 DIP**, uguale a qualsiasi DPI) e pannello a filo della finestra | ✅ nessuno spicchio di materiale sugli angoli |
+| F37.5 | Tinta del vetro e velo del pannello derivati dallo slider **Trasparenza del vetro** (0,28–0,46 e 0,23–0,39) | ✅ la barra è vetro vero, non un rettangolo scuro quasi opaco |
+| F37.6 | Righe delle frasi: raggio 12, gradiente di vetro con la tinta del parlante, bordo chiaro da 1 px e barra di accento più corta | ✅ le frasi non sono più rettangoli piatti |
+| F37.7 | Rimossi `SetWindowRgn`/`CreateRoundRectRgn` e la regione HWND: non servivano più e **non funzionavano** con il materiale | ✅ meno codice nativo, autotest aggiornato |
+| F37.8 | Modalità minimal: da pillola a **capsula** 320×48 con lo stesso raggio (DWM non sa fare una pillola: solo 8 o 4 px) | ✅ forma coerente con la card |
+
+### Verifiche
+
+| Criterio | Esito |
+|---|---|
+| Nessun bordo squadrato, card e capsula | ✅ cattura a pixel su sfondo a strisce nette: il materiale finisce esattamente sull'arco del pannello |
+| Vetro sfocato e leggibile | ✅ pixel interni diversi su sfondo bianco (68) e nero (22), con testo leggibile |
+| Testo nitido | ✅ finestra non a strati: ClearType conservato |
+| Test automatici | ✅ **123 verdi** |
+| Autotest barra `--bar-selftest` | ✅ PASS (capsula e card senza cornice, pannello a filo della finestra) |
+
+**Decisioni F37:**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-52 | Materiale su finestra **normale** invece che a strati | La finestra a strati ritaglia il vetro sulla forma che vuoi, ma spegne il ClearType e lascia superfici fantasma al primo cambio di misura |
+| D-53 | Angoli della finestra a DWM invece della regione HWND | `SetWindowRgn` ritaglia il contenuto ma **non** il materiale (verificato): il rettangolo restava |
+| D-54 | Acrilico dell'accent policy invece di Mica/Acrylic di DWM | La barra è quasi sempre in secondo piano e il backdrop di DWM diventa tinta unita senza fuoco |
+| D-55 | Raggio 8 DIP per card e capsula | DWM sa arrotondare solo a 8 (o 4) px: scegliere un raggio diverso lascia spicchi di vetro scoperti. Il raggio 8 in DIP è costante a ogni DPI |
+| D-56 | Il velo del pannello scende a ~0,3 mentre prima copriva il 72% | Sopra l'acrilico il velo pieno nascondeva il vetro: la barra era un rettangolo scuro |
+| D-57 | Correzione ripresa da [HWWidget](https://github.com/renegadeFree/HWWidget) (`Backdrop.cs`, `MainWindow.xaml.cs`) | È una implementazione già collaudata dall'utente per la stessa piattaforma: meno tentativi, stesso risultato |
+
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.
 - **Enunciato**: porzione di audio compresa tra due silenzi, inviata all'ASR.

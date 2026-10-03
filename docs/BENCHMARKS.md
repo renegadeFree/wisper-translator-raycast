@@ -44,3 +44,24 @@ Note misurate, non stimate:
   con il WebSocket i parziali arrivano mentre il server decodifica, senza coda;
 - il test a 4 timbri reali non è possibile su questa macchina: Windows ha solo 3 voci SAPI
   installate (Zira, Hazel, Elsa), quindi il quarto parlante è una variante di tono della prima.
+
+## Traduzione a due corsie — parziali istantanei e rifinitura
+
+Motore rapido: MTranServer/Bergamot (misura su frase intera: **17 ms** a caldo, 426 ms la prima
+richiesta perché carica il modello). Motore di rifinitura: Marian opus-mt int8 in ONNX Runtime.
+
+| Data | Macchina | Prova | Prima traduzione dal primo parziale | Traduzioni pubblicate | Passaggi di qualità |
+|---|---|---|---|---|---|
+| 2026-10-03 18:52 | RE_NEGADE_FREE (24 core) | clip italiana → inglese, 6 enunciati, 35 s di audio di sistema | 0–178 ms | 116 su 135 righe di sessione | 10 |
+| 2026-10-03 18:53 | RE_NEGADE_FREE (24 core) | corsia isolata con i motori reali, parziale ogni 200 ms | 342 ms (comprende il caricamento del modello ONNX) | una ogni ~200 ms | 2 |
+
+| Misura isolata | Tempo |
+|---|---|
+| Bergamot su frase intera (a caldo) | 17 ms |
+| Marian ONNX it→en, frase intera | 177 ms |
+| Marian ONNX en→it, frase intera | 227 ms |
+
+Prima di questa lavorazione la traduzione del parziale veniva **annullata** a ogni aggiornamento
+con 300 ms di debounce: parlando di continuo non arrivava mai a destinazione e il testo tradotto
+compariva solo alla pausa. Le misure sopra sono con la nuova politica "latest-wins senza
+annullamento".

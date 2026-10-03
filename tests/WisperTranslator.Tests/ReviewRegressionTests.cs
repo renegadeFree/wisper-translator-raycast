@@ -105,7 +105,22 @@ public class ReviewRegressionTests
             Field(session, "_historySessionId", id);
             Field(session, "_translationService", new TranslationService(new EchoEngine()));
             Publish(session, "testo", true);
-            Assert.Equal("tradotto: testo", Assert.Single(store.Cues(id)).Translation);
+
+            // La traduzione arriva dalle corsie in background: si attende che sia pubblicata.
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var translation = string.Empty;
+            while (DateTime.UtcNow < deadline)
+            {
+                translation = Assert.Single(store.Cues(id)).Translation;
+                if (translation.Length > 0)
+                {
+                    break;
+                }
+
+                await Task.Delay(50);
+            }
+
+            Assert.Equal("tradotto: testo", translation);
             Assert.Equal(1, session.Transcribed);
         }
         finally { DeleteDatabase(path); }
@@ -175,7 +190,7 @@ public class ReviewRegressionTests
             PartialModelId = "inesistente", BarLeft = double.NaN };
         settings.NormalizeValues();
         Assert.Equal(BarGeometry.DefaultWidth, settings.BarWidth);
-        Assert.Equal(2, settings.BarRows);
+        Assert.Equal(BarGeometry.MaxRows, settings.BarRows);
         Assert.Equal(3, settings.BarBuffer);
         Assert.Equal(BarTextMode.Entrambi, settings.BarText);
         Assert.Equal(16, settings.FontSize);
@@ -189,9 +204,22 @@ public class ReviewRegressionTests
     {
         Assert.All(ModelCatalog.All.Where(entry => !entry.ManagedByServer), entry =>
         {
+            Assert.True(entry.ExpectedSizeBytes > 1024);
+            if (entry.Packaging == ModelPackaging.Files)
+            {
+                // I modelli multi-file hanno un hash per file, non uno solo per il pacchetto.
+                Assert.NotNull(entry.Files);
+                Assert.All(entry.Files!, file =>
+                {
+                    Assert.Equal(64, file.Sha256.Length);
+                    Assert.True(file.Sha256.All(Uri.IsHexDigit));
+                    Assert.Equal("https", new Uri(file.Url).Scheme);
+                });
+                return;
+            }
+
             Assert.Equal(64, entry.Sha256.Length);
             Assert.True(entry.Sha256.All(Uri.IsHexDigit));
-            Assert.True(entry.ExpectedSizeBytes > 1024);
             Assert.Equal("https", new Uri(entry.Url).Scheme);
         });
     }

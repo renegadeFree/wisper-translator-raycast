@@ -85,6 +85,9 @@ public sealed class AppSettings
 
     public bool Translate { get; set; } = true;
 
+    /// <summary>Secondo stadio di traduzione (modello Marian ONNX): auto, spento o forzato.</summary>
+    public QualityTranslationMode QualityTranslation { get; set; } = QualityTranslationMode.Auto;
+
     /// <summary>Modalità conversazione: microfono "Tu" e audio di sistema con i nomi dei parlanti.</summary>
     public bool ConversationMode { get; set; }
 
@@ -100,11 +103,17 @@ public sealed class AppSettings
 
     public double? BarTop { get; set; }
 
-    /// <summary>Frasi visibili nella barra (1–2): le altre restano sotto, raggiungibili con la rotellina.</summary>
+    /// <summary>Frasi visibili nella barra (1–5): le altre restano sotto, raggiungibili con la rotellina.</summary>
     public int BarRows { get; set; } = 2;
+
+    /// <summary>Altezza libera della card in pixel: si trascina e si salva, il corpo mostra ciò che ci sta.</summary>
+    public double BarHeight { get; set; } = BarGeometry.WindowHeight(2);
 
     /// <summary>Larghezza della capsula in pixel: una frase lunga deve starci senza essere tagliata.</summary>
     public double BarWidth { get; set; } = BarGeometry.DefaultWidth;
+
+    /// <summary>Opacità del vetro (0,55–0,92): più bassa, più acrilico si vede dietro la barra.</summary>
+    public double BarOpacity { get; set; } = 0.72;
 
     /// <summary>Quante frasi tenere in memoria nella barra (3–8).</summary>
     public int BarBuffer { get; set; } = 5;
@@ -117,6 +126,9 @@ public sealed class AppSettings
 
     /// <summary>Riduce o disattiva le animazioni della barra.</summary>
     public bool BarAnimations { get; set; } = true;
+
+    /// <summary>Quando non ci sono sottotitoli, la card si riduce a una pillola minimal.</summary>
+    public bool BarMiniIdle { get; set; } = true;
 
     /// <summary>Profilo prestazioni: Auto segue l'hardware rilevato, gli altri lo forzano.</summary>
     public PerformancePreset Preset { get; set; } = PerformancePreset.Auto;
@@ -177,7 +189,7 @@ public sealed class AppSettings
     /// </summary>
     private void Migrate()
     {
-        if (SettingsVersion >= 4)
+        if (SettingsVersion >= 5)
         {
             return;
         }
@@ -196,13 +208,16 @@ public sealed class AppSettings
 
         BarRows = Math.Clamp(BarRows, 1, BarGeometry.MaxRows);
         BarBuffer = Math.Clamp(BarBuffer, 3, 8);
-        SettingsVersion = 4;
+        BarMiniIdle = true;
+        SettingsVersion = 5;
         Save();
     }
 
     internal void NormalizeValues()
     {
         BarWidth = BarGeometry.ClampWidth(BarWidth);
+        BarHeight = BarGeometry.ClampHeight(BarHeight);
+        BarOpacity = BarGeometry.ClampOpacity(BarOpacity);
         BarRows = Math.Clamp(BarRows, 1, BarGeometry.MaxRows);
         BarBuffer = Math.Clamp(BarBuffer, 3, 8);
         if (!Enum.IsDefined(BarText)) BarText = BarTextMode.Entrambi;
@@ -251,6 +266,7 @@ public sealed class AppSettings
             SourceLanguage = SourceLanguage,
             TargetLanguage = SourceLanguage == "it" ? "en" : "it",
             Translate = Translate,
+            QualityTranslation = QualityTranslation,
             SystemAudio = SystemAudio,
             Microphone = Microphone,
             ConversationMode = ConversationMode,

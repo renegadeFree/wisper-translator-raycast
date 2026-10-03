@@ -33,6 +33,8 @@ per ognuno è indicata la licenza e l'obbligo che ne deriva.
 | **Sortformer 4 parlanti v2 (q8_0)** | CC-BY-4.0 | diarizzatore alternativo; l'attribuzione è indicata nella scheda Modelli |
 | **Graphviz** (Windows x64) | EPL-1.0 | scaricato da GitLab ufficiale; usato come processo locale per impaginare le mappe |
 | **Parakeet TDT 0.6B v3** | CC-BY-4.0 | opzione futura per la corsia finale, non ancora distribuita |
+| **Marian opus-mt IT↔EN** (Helsinki-NLP) | Apache-2.0 | secondo stadio di traduzione (rifinitura a metà frase e a fine enunciato); scaricato su richiesta, non ridistribuito |
+| **Conversioni ONNX int8 `Xenova/opus-mt-it-en` e `Xenova/opus-mt-en-it`** | Apache-2.0 (modelli di origine) | encoder e decoder ONNX usati da ONNX Runtime; attribuzione a Xenova per l'esportazione |
 
 ## Template inclusi
 

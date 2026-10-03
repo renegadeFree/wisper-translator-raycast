@@ -85,6 +85,7 @@ public sealed class RealtimeTranscriber : IDisposable
     private string? _language;
     private int _streamingUtterance;
     private TimeSpan _streamingStart;
+    private readonly StreamingTextAccumulator _streamingText = new();
     private long _samplesSeen;
     private bool _disposed;
     private Task _workers = Task.CompletedTask;
@@ -192,6 +193,7 @@ public sealed class RealtimeTranscriber : IDisposable
                     currentUtterance = ++_utteranceId;
                     Volatile.Write(ref _streamingUtterance, currentUtterance);
                     _streamingStart = _segmenter.CurrentUtteranceStart;
+                    _streamingText.Reset();
                 }
 
                 if (_streaming is { IsFaulted: false })
@@ -203,6 +205,7 @@ public sealed class RealtimeTranscriber : IDisposable
                 {
                     failed.Update -= OnStreamingUpdate;
                     _streaming = null;
+                    _streamingText.Reset();
                     await failed.DisposeAsync().ConfigureAwait(false);
                     _lastPartialText = null;
                 }
@@ -303,6 +306,7 @@ public sealed class RealtimeTranscriber : IDisposable
             var failed = _streaming;
             failed.Update -= OnStreamingUpdate;
             _streaming = null;
+            _streamingText.Reset();
             await failed.DisposeAsync().ConfigureAwait(false);
         }
     }
@@ -318,6 +322,7 @@ public sealed class RealtimeTranscriber : IDisposable
         var previous = _streaming;
         previous.Update -= OnStreamingUpdate;
         _streaming = null;
+        _streamingText.Reset();
         await previous.DisposeAsync().ConfigureAwait(false);
 
         var next = new NeMoRealtimeClient(_streamingPort);
@@ -339,9 +344,15 @@ public sealed class RealtimeTranscriber : IDisposable
             return;
         }
 
+        var accumulated = _streamingText.Append(text, completed);
+        if (string.IsNullOrWhiteSpace(accumulated))
+        {
+            return;
+        }
+
         Update?.Invoke(new TranscriptUpdate(
             utterance,
-            text.Trim(),
+            accumulated,
             false,
             _streamingStart,
             TimeSpan.Zero,

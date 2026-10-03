@@ -8,10 +8,25 @@ namespace WisperTranslator.App.Interop;
 internal static class Win32
 {
     private const int GwlExStyle = -20;
+    private const int GwlStyle = -16;
     private const int WsExTransparent = 0x00000020;
     private const int WsExLayered = 0x00080000;
     private const int WsExToolWindow = 0x00000080;
     private const int WsExNoActivate = 0x08000000;
+    private const int WsExAppWindow = 0x00040000;
+    private const int WsCaption = 0x00C00000;
+    private const int WsThickFrame = 0x00040000;
+    private const int WsBorder = 0x00800000;
+    private const int WsDlgFrame = 0x00400000;
+    private const int WsSysMenu = 0x00080000;
+    private const int WsMinimizeBox = 0x00020000;
+    private const int WsMaximizeBox = 0x00010000;
+    private const int WsPopup = unchecked((int)0x80000000);
+    private const int SwpNoSize = 0x0001;
+    private const int SwpNoMove = 0x0002;
+    private const int SwpNoZOrder = 0x0004;
+    private const int SwpNoActivate = 0x0010;
+    private const int SwpFrameChanged = 0x0020;
 
     // Esclude la finestra dalla cattura (registrazioni schermo e condivisioni).
     private const uint WdaExcludeFromCapture = 0x00000011;
@@ -28,6 +43,16 @@ internal static class Win32
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
     [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -36,28 +61,20 @@ internal static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-    [DllImport("gdi32.dll", SetLastError = true)]
-    private static extern IntPtr CreateRoundRectRgn(
-        int left,
-        int top,
-        int right,
-        int bottom,
-        int ellipseWidth,
-        int ellipseHeight);
-
-    [DllImport("gdi32.dll", SetLastError = true)]
-    private static extern bool DeleteObject(IntPtr handle);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern int SetWindowRgn(IntPtr hWnd, IntPtr region, bool redraw);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern int GetWindowRgn(IntPtr hWnd, IntPtr region);
-
     public static IntPtr Handle(Window window) => new WindowInteropHelper(window).Handle;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaWindowCornerPreference = 33;
+    private const int DwmwaBorderColor = 34;
+    private const int DwmwaSystemBackdropType = 38;
+    private const int DwmcpRound = 2;
+    private const int DwmwaColorNone = unchecked((int)0xFFFFFFFE);
+    private const int DwmsbtNone = 1;
+    private const int AccentEnableAcrylicBlurBehind = 4;
+    private const int WcaAccentPolicy = 19;
 
     [DllImport("user32.dll")]
     private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionAttribute data);
@@ -80,20 +97,52 @@ internal static class Win32
     }
 
     /// <summary>
-    /// Compatibilità Windows 10: WCA_ACCENT_POLICY non è un contratto pubblico del SDK.
-    /// Su Windows 11 si usa DWM; se questo fallback fallisce, la barra resta opaca.
+    /// Materiale della barra: angoli arrotondati da DWM (è DWM a ritagliare il vetro sulla forma
+    /// della finestra), niente bordo, e acrilico dell'accent policy invece del backdrop di sistema.
+    /// L'acrilico "accent" resta sfocato anche quando la finestra non è attiva, mentre Mica e
+    /// Acrylic di DWM diventano tinta unita senza fuoco: la barra è quasi sempre in secondo piano.
     /// </summary>
-    public static bool SetLegacyAcrylic(Window window, bool enabled)
+    public static bool ApplyAcrylicBackdrop(Window window, byte tintAlpha, byte red, byte green, byte blue)
     {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763)) return false;
-        var policy = new AccentPolicy { State = enabled ? 4 : 0, Color = 0x30211818 };
+        var handle = Handle(window);
+        if (handle == IntPtr.Zero || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
+        {
+            return false;
+        }
+
+        var dark = 1;
+        DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
+        var round = DwmcpRound;
+        DwmSetWindowAttribute(handle, DwmwaWindowCornerPreference, ref round, sizeof(int));
+        var noBorder = DwmwaColorNone;
+        DwmSetWindowAttribute(handle, DwmwaBorderColor, ref noBorder, sizeof(int));
+
+        // Il backdrop di sistema vince sull'accent policy: va spento prima di applicarla.
+        var noBackdrop = DwmsbtNone;
+        DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref noBackdrop, sizeof(int));
+
+        var tint = (uint)((tintAlpha << 24) | (blue << 16) | (green << 8) | red);
+        return ApplyAccent(handle, AccentEnableAcrylicBlurBehind, tint);
+    }
+
+    /// <summary>Toglie l'acrilico della barra: il pannello torna un rettangolo pieno.</summary>
+    public static bool ClearAcrylicBackdrop(Window window)
+    {
+        var handle = Handle(window);
+        return handle != IntPtr.Zero && ApplyAccent(handle, 0, 0);
+    }
+
+    private static bool ApplyAccent(IntPtr handle, int state, uint color)
+    {
+        if (handle == IntPtr.Zero) return false;
+        var policy = new AccentPolicy { State = state, Flags = state == 0 ? 0 : 2, Color = color };
         var size = Marshal.SizeOf<AccentPolicy>();
         var pointer = Marshal.AllocHGlobal(size);
         try
         {
             Marshal.StructureToPtr(policy, pointer, false);
-            var data = new CompositionAttribute { Attribute = 19, Data = pointer, Size = (nuint)size };
-            return SetWindowCompositionAttribute(Handle(window), ref data) != 0;
+            var data = new CompositionAttribute { Attribute = WcaAccentPolicy, Data = pointer, Size = (nuint)size };
+            return SetWindowCompositionAttribute(handle, ref data) != 0;
         }
         catch (EntryPointNotFoundException) { return false; }
         finally { Marshal.FreeHGlobal(pointer); }
@@ -138,64 +187,37 @@ internal static class Win32
     {
         var handle = Handle(window);
         if (handle == IntPtr.Zero) return;
-        SetWindowLong(handle, GwlExStyle, GetWindowLong(handle, GwlExStyle) | WsExToolWindow);
+        var extended = GetWindowLong(handle, GwlExStyle);
+        SetWindowLong(handle, GwlExStyle, (extended | WsExToolWindow) & ~WsExAppWindow);
+
+        // Il tema dell'applicazione può ripristinare uno stile con caption/thick frame: la barra
+        // deve restare un popup anche dopo attivazione, cambio tema e cambio DPI.
+        var style = GetWindowLong(handle, GwlStyle);
+        style &= ~(WsCaption | WsThickFrame | WsBorder | WsDlgFrame | WsSysMenu | WsMinimizeBox | WsMaximizeBox);
+        style |= WsPopup;
+        SetWindowLong(handle, GwlStyle, style);
+        SetWindowPos(
+            handle,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+
         var dark = 1;
-        DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
-        var noBorder = unchecked((int)0xFFFFFFFE);
-        DwmSetWindowAttribute(handle, 34, ref noBorder, sizeof(int));
+        DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
+        var noBorder = DwmwaColorNone;
+        DwmSetWindowAttribute(handle, DwmwaBorderColor, ref noBorder, sizeof(int));
     }
 
-    /// <summary>
-    /// Ritaglia davvero l'HWND ad angoli arrotondati: è ciò che impedisce ai pixel acrilici
-    /// di riempire il rettangolo attorno alla capsula.
-    /// </summary>
-    public static bool ApplyRoundedRegion(Window window, int widthPixels, int heightPixels, int diameterPixels)
+    /// <summary>Per l'autotest: vero se è rimasto uno stile finestra classico.</summary>
+    public static bool HasWindowFrame(Window window)
     {
         var handle = Handle(window);
-        if (handle == IntPtr.Zero || widthPixels < 2 || heightPixels < 2)
-        {
-            return false;
-        }
-
-        var region = CreateRoundRectRgn(0, 0, widthPixels + 1, heightPixels + 1, diameterPixels, diameterPixels);
-        if (region == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        // SetWindowRgn prende possesso della regione: non va cancellata qui.
-        if (SetWindowRgn(handle, region, true) == 0)
-        {
-            DeleteObject(region);
-            return false;
-        }
-
-        return true;
-    }
-
-    /// <summary>Tipo di regione corrente: 3 = COMPLEXREGION, cioè non è un semplice rettangolo.</summary>
-    public static int WindowRegionType(Window window)
-    {
-        var handle = Handle(window);
-        if (handle == IntPtr.Zero)
-        {
-            return 0;
-        }
-
-        var probe = CreateRoundRectRgn(0, 0, 1, 1, 2, 2);
-        if (probe == IntPtr.Zero)
-        {
-            return 0;
-        }
-
-        try
-        {
-            return GetWindowRgn(handle, probe);
-        }
-        finally
-        {
-            DeleteObject(probe);
-        }
+        if (handle == IntPtr.Zero) return false;
+        var style = GetWindowLong(handle, GwlStyle);
+        return (style & (WsCaption | WsThickFrame | WsBorder | WsDlgFrame)) != 0;
     }
 
     /// <summary>Rende la finestra trasparente ai click e, se richiesto, invisibile alle registrazioni.</summary>

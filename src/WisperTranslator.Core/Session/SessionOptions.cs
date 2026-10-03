@@ -3,6 +3,19 @@ using WisperTranslator.Core.Hardware;
 
 namespace WisperTranslator.Core.Session;
 
+/// <summary>Come usare il secondo motore di traduzione (rifinitura di qualità).</summary>
+public enum QualityTranslationMode
+{
+    /// <summary>Attivo da solo sulle macchine che lo reggono, spento su quelle minime.</summary>
+    Auto,
+
+    /// <summary>Mai: resta la sola corsia rapida.</summary>
+    Off,
+
+    /// <summary>Sempre, anche su macchine deboli (scelta esplicita dell'utente).</summary>
+    Forced,
+}
+
 /// <summary>Configurazione di una sessione di trascrizione e traduzione.</summary>
 public sealed class SessionOptions
 {
@@ -45,6 +58,12 @@ public sealed class SessionOptions
     public string? MicrophoneDeviceId { get; set; }
 
     public int TranslationPort { get; set; } = 8989;
+
+    /// <summary>
+    /// Secondo stadio di traduzione: Auto lo attiva sulle macchine che lo reggono, Forzato lo
+    /// impone, Spento lascia la sola corsia rapida.
+    /// </summary>
+    public QualityTranslationMode QualityTranslation { get; set; } = QualityTranslationMode.Auto;
 
     public int RetentionDays { get; set; }
 

@@ -792,22 +792,40 @@ public partial class MainWindow : FluentWindow
         }
 
         _bar.EnableShotMode();
-        _bar.ApplyLayout();
+        _bar.PrepareShot(mini: false, hover: false);
         SetStatus(string.Empty);
         RefreshBar();
         await Task.Delay(900);
         ShotLog($"misure barra: {_bar.Describe()}");
-        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-ascolto.png"), background, BarRadius());
+        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-ascolto.png"), background, BarRadius(mini: false));
 
-        // Barra a riposo: suggerimento al centro, nessuna frase.
+        // Card completa con le frasi, sessione ferma.
         _shotRunning = false;
-        _cues.Clear();
         SetStatus(string.Empty);
         RefreshBar();
         await Task.Delay(700);
-        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-riposo.png"), background, BarRadius());
+        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-cue-ferma.png"), background, BarRadius(mini: false));
+
+        // Pillola minimal a riposo: nessuna frase, nessuna sessione.
+        _cues.Clear();
+        _shotRunning = false;
+        _bar.PrepareShot(mini: true, hover: false);
+        SetStatus(string.Empty);
+        RefreshBar();
+        await Task.Delay(700);
+        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-riposo.png"), background, Core.Settings.BarGeometry.MiniRadius);
+
+        // Pillola minimal in ascolto, con prompt e stop visibili.
+        _shotRunning = true;
+        _bar.PrepareShot(mini: true, hover: true);
+        SetStatus("In ascolto");
+        RefreshBar();
+        await Task.Delay(700);
+        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-mini-ascolto.png"), background, Core.Settings.BarGeometry.MiniRadius);
 
         // Pannello esteso con le stesse frasi d'esempio.
+        _shotRunning = true;
+        _bar.PrepareShot(mini: false, hover: false);
         foreach (var cue in BarSamples.Cues())
         {
             _cues.Add(cue);
@@ -839,12 +857,22 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// Autotest della barra: verifica che la finestra abbia davvero una regione non
-    /// rettangolare (COMPLEXREGION) invece del vecchio HWND squadrato con l'acrilico.
+    /// Autotest della barra: verifica che il pannello riempia esattamente la finestra e che non
+    /// resti una cornice. Se resta scoperto anche un solo pixel di finestra, il vetro ci si
+    /// disegna sopra con gli angoli squadrati: era quella la fascia attorno al pannello.
     /// </summary>
     internal async Task BarSelfTestAsync()
     {
         _shotMode = true;
+        // Frasi d'esempio, così l'autotest misura anche le righe (e una cattura manuale della
+        // barra mostra il vetro vero con dentro il testo vero).
+        _shotRunning = true;
+        _cues.Clear();
+        foreach (var sample in Core.Session.BarSamples.Cues())
+        {
+            _cues.Add(sample);
+        }
+
         ShowBar();
         if (_bar is null)
         {
@@ -853,12 +881,28 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        _bar.EnableShotMode();
-        await Task.Delay(700);
-        var region = _bar.RegionType;
-        var message = region == 3
-            ? $"PASS: regione finestra COMPLEXREGION (angoli arrotondati reali) · {_bar.Describe()}"
-            : $"FAIL: regione finestra {region} (attesa 3 = COMPLEXREGION) · {_bar.Describe()}";
+        // Nessuna modalità foto: l'autotest deve misurare la finestra vera, con l'acrilico reale.
+        _bar.PrepareShot(mini: true, hover: false);
+        await Task.Delay(500);
+        var miniOk = _bar.IsMini
+                     && Math.Abs(_bar.Height - Core.Settings.BarGeometry.MiniHeight) < 1
+                     && !_bar.HasWindowFrame
+                     && _bar.HasShellClip
+                     && _bar.ShellFillsWindow;
+        var miniDescription = _bar.Describe();
+
+        _bar.PrepareShot(mini: false, hover: false);
+        await Task.Delay(500);
+        var fullHeight = Core.Settings.BarGeometry.ClampHeight(_settings.BarHeight);
+        var fullOk = !_bar.IsMini
+                     && Math.Abs(_bar.Height - fullHeight) < 1
+                     && !_bar.HasWindowFrame
+                     && _bar.HasShellClip
+                     && _bar.ShellFillsWindow;
+        var ok = miniOk && fullOk;
+        var message = ok
+            ? $"PASS: capsula e card senza cornice, pannello a filo della finestra, vetro attivo: {_bar.HasAcrylic} · {_bar.Describe()}"
+            : $"FAIL: mini={miniOk} ({miniDescription}), full={fullOk} ({_bar.Describe()})";
 
         try
         {
@@ -874,8 +918,9 @@ public partial class MainWindow : FluentWindow
         ExitApplication();
     }
 
-    private double BarRadius() =>
-        _bar is null ? 20 : Core.Settings.BarGeometry.CornerRadius(_bar.Height);
+    private double BarRadius(bool mini) =>
+        mini ? Core.Settings.BarGeometry.MiniRadius
+        : _bar is null ? 20 : Core.Settings.BarGeometry.CornerRadius(_bar.Height);
 
     private static void Capture(FrameworkElement element, string path, System.Windows.Media.Color background, double cornerRadius)
     {

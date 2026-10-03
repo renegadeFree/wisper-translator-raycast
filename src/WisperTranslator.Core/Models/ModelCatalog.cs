@@ -1,12 +1,15 @@
 namespace WisperTranslator.Core.Models;
 
 public enum ModelRole { Asr, Vad, Translation, Diarization, Runtime }
-public enum ModelPackaging { SingleFile, Zip, Runtime }
+public enum ModelPackaging { SingleFile, Zip, Runtime, Files }
+
+/// <summary>Un file di un modello multi-file scaricato singolarmente e verificato con hash.</summary>
+public sealed record ModelFile(string Url, string RelativePath, long SizeBytes, string Sha256);
 
 public sealed record ModelCatalogEntry(string Id, string DisplayName, ModelRole Role, string Tier,
     string Url, string FileName, string RelativePath, long ExpectedSizeBytes, string Sha256,
     string License, string About, ModelPackaging Packaging = ModelPackaging.SingleFile,
-    bool ManagedByServer = false, string? RequiredFile = null);
+    bool ManagedByServer = false, string? RequiredFile = null, IReadOnlyList<ModelFile>? Files = null);
 
 /// <summary>Origini ufficiali e revisioni fissate; hash SHA-256 dei file, non dei puntatori LFS.</summary>
 public static class ModelCatalog
@@ -82,9 +85,63 @@ public static class ModelCatalog
         "bergamot-it-en", "Bergamot IT ↔ EN", ModelRole.Translation, "C", "", "", "mt", 0, "",
         "MPL-2.0", "Modelli Mozilla gestiti e verificati da MTranServer.", ManagedByServer: true);
 
+    private static ModelCatalogEntry OpusMt(string id, string name, string pair, long encoderSize,
+        string encoderSha, long decoderSize, string decoderSha, long tokenizerSize, string tokenizerSha,
+        string configSha, string generationSha) =>
+        new(id, name, ModelRole.Translation, "B", "", id, $"onnx/{id}",
+            encoderSize + decoderSize + tokenizerSize + 1376 + 293, "",
+            "Apache-2.0", "Secondo stadio di traduzione (ONNX, CPU).", ModelPackaging.Files,
+            false, "encoder_model_int8.onnx",
+            [
+                new ModelFile(
+                    $"https://huggingface.co/Xenova/opus-mt-{pair}/resolve/main/onnx/encoder_model_int8.onnx",
+                    "onnx/encoder_model_int8.onnx", encoderSize, encoderSha),
+                new ModelFile(
+                    $"https://huggingface.co/Xenova/opus-mt-{pair}/resolve/main/onnx/decoder_model_merged_int8.onnx",
+                    "onnx/decoder_model_merged_int8.onnx", decoderSize, decoderSha),
+                new ModelFile(
+                    $"https://huggingface.co/Xenova/opus-mt-{pair}/resolve/main/tokenizer.json",
+                    "tokenizer.json", tokenizerSize, tokenizerSha),
+                new ModelFile(
+                    $"https://huggingface.co/Xenova/opus-mt-{pair}/resolve/main/config.json",
+                    "config.json", 1376, configSha),
+                new ModelFile(
+                    $"https://huggingface.co/Xenova/opus-mt-{pair}/resolve/main/generation_config.json",
+                    "generation_config.json", 293, generationSha),
+            ]);
+
+    /// <summary>
+    /// Marian opus-mt (Helsinki-NLP, Apache-2.0) esportato in ONNX int8 da Xenova: è il motore
+    /// che rifinisce la frase a metà enunciato e alla fine, quando la corsia rapida ha già
+    /// mostrato il senso di quello che si sta dicendo.
+    /// </summary>
+    public static ModelCatalogEntry OpusMtItalianEnglish { get; } = OpusMt(
+        "opus-mt-it-en", "Marian opus-mt IT → EN", "it-en",
+        60600089, "018a2ea5923c123a71db07ca359c031840d43f2d8d2e0ceae3919f0903cf6678",
+        67948066,
+        "1b866284a289f399fba918049526706a3b1cc3a451d8c16e61d35a85329bb69c",
+        7942314,
+        "c19e1dac8287ec5c5d47a0d81be5e0fd11755666b996c764ef4d13bb8117e3a2",
+        "4b82a23b7a91b213a934db70d0a33712a739fdd7c5686b02d89642d7dcfc7ac4",
+        "bab9fcae043547da07e13c701f77cf55b6b1517d6f73848c5c4476e7255da512");
+
+    public static ModelCatalogEntry OpusMtEnglishItalian { get; } = OpusMt(
+        "opus-mt-en-it", "Marian opus-mt EN → IT", "en-it",
+        60423960, "af0c1ef4fcd9c472e591cf7babd42ca3c3bae3f0cf2e1353c55b123638dc9bd0",
+        67770561,
+        "c0334a57c21714aac08c1229684e28013f9a290d7fbd5bd0d513e19c7a73bfc6",
+        7904597,
+        "fb93411d5198eb85753bbd68e9ac24ccb42071003214851b2f37c81f2ea50416",
+        "1cf40ab3aa16e8b6ea7c9766981de1da705a161564c0d5ad187c1e62e5c8ee85",
+        "15a4ad1f54640380c5119641a6a6247862bd32dc982b8170024d9d03eb3831a2");
+
+    /// <summary>Cartella madre dei motori di rifinitura ONNX: <c>models\mt\onnx</c>.</summary>
+    public static string OnnxDirectory => "onnx";
+
     public static IReadOnlyList<ModelCatalogEntry> All { get; } =
         [.. Asr, Vad, VoskItalian, VoskEnglish, NemotronStreaming,
-         NemotronDiarization, SortformerDiarization, NeMoRuntime, GraphvizRuntime, TranslationModels];
+         NemotronDiarization, SortformerDiarization, NeMoRuntime, GraphvizRuntime, TranslationModels,
+         OpusMtItalianEnglish, OpusMtEnglishItalian];
 
     public static ModelCatalogEntry ById(string id) => All.FirstOrDefault(entry =>
         entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase))

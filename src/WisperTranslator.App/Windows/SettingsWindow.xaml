@@ -106,6 +106,15 @@
                         <TextBlock x:Name="ProfileStatusText" Margin="0,6,0,0" TextWrapping="Wrap" />
 
                         <Separator Margin="0,16,0,12" />
+                        <TextBlock Text="Traduzione" Margin="0,0,0,4" />
+                        <ComboBox x:Name="TranslationQualityBox" DisplayMemberPath="Label"
+                                  SelectionChanged="OnTranslationQualityChanged" />
+                        <TextBlock x:Name="TranslationQualityHint" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <Button Content="Scarica i modelli di rifinitura (Marian ONNX)" Padding="10,4" Margin="0,8,0,0"
+                                Click="OnDownloadQualityModelsClicked" />
+
+                        <Separator Margin="0,16,0,12" />
                         <TextBlock Text="Accelerazione GPU (sperimentale)" Margin="0,0,0,4" />
                         <ComboBox x:Name="GpuBox" DisplayMemberPath="Label" SelectionChanged="OnGpuChanged" />
                         <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" FontSize="11"
@@ -163,6 +172,8 @@
                                    Text="La barra fluttuante sta sopra le altre finestre, si trascina ovunque e si aggancia ai bordi. Le frasi oltre quelle visibili restano sotto: si raggiungono con la rotellina del mouse mentre il puntatore è sulla barra." />
 
                         <CheckBox x:Name="BarEnabledCheck" Content="Mostra la barra all'avvio" Click="OnBarChanged" />
+                        <CheckBox x:Name="BarMiniIdleCheck" Content="Riduci a pillola quando non ci sono sottotitoli"
+                                  Margin="0,8,0,0" Click="OnBarChanged" />
                         <CheckBox x:Name="BarAnimationsCheck" Content="Animazioni (comparsa, respiro, scorrimento)"
                                   Margin="0,8,0,0" Click="OnBarChanged" />
                         <CheckBox x:Name="BarDiscreetCheck" Content="Modalità discreta: lascia passare i clic (maniglia esclusa)"
@@ -172,11 +183,17 @@
                         <ComboBox x:Name="BarTextBox" SelectionChanged="OnBarChanged" />
 
                         <controls:SliderRow x:Name="BarRowsRow" Label="Frasi visibili" Margin="0,14,0,0"
-                                            Minimum="1" Maximum="2" TickFrequency="1"
+                                            Minimum="1" Maximum="5" TickFrequency="1"
                                             ValueFormat="{}{0:0}" ValueChanged="OnBarChanged" />
                         <controls:SliderRow x:Name="BarWidthRow" Label="Larghezza barra" Margin="0,12,0,0"
                                             Minimum="480" Maximum="1600" TickFrequency="20"
                                             ValueFormat="{}{0:0} px" ValueChanged="OnBarChanged" />
+                        <controls:SliderRow x:Name="BarHeightRow" Label="Altezza barra" Margin="0,12,0,0"
+                                            Minimum="120" Maximum="900" TickFrequency="10"
+                                            ValueFormat="{}{0:0} px" ValueChanged="OnBarChanged" />
+                        <controls:SliderRow x:Name="BarOpacityRow" Label="Trasparenza del vetro" Margin="0,12,0,0"
+                                            Minimum="0.55" Maximum="0.92" TickFrequency="0.01"
+                                            ValueFormat="{}{0:P0}" ValueChanged="OnBarChanged" />
                         <controls:SliderRow x:Name="BarBufferRow" Label="Frasi in memoria" Margin="0,12,0,0"
                                             Minimum="3" Maximum="8" TickFrequency="1"
                                             ValueFormat="{}{0:0}" ValueChanged="OnBarChanged" />

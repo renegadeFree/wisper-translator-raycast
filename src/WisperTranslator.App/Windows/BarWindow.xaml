@@ -1,22 +1,19 @@
-<ui:FluentWindow x:Class="WisperTranslator.App.Windows.BarWindow"
-                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-                 Title="Wisper · Trascrizione"
-                 Width="760" Height="248" MinWidth="480" MaxWidth="1600"
-                 WindowStyle="None" ResizeMode="CanResize"
-                 ShowInTaskbar="False" ShowActivated="False"
-                 WindowStartupLocation="Manual"
-                 WindowBackdropType="None" WindowCornerPreference="DoNotRound"
-                 ExtendsContentIntoTitleBar="True" Background="Transparent"
-                 FontFamily="Segoe UI" Foreground="#F3F3F6"
-                 UseLayoutRounding="True" SnapsToDevicePixels="True">
-    <!-- Solo il contenuto dell'overlay: nessun template/cornice da finestra applicativa. -->
-    <Window.Template>
-        <ControlTemplate TargetType="ui:FluentWindow">
-            <AdornerDecorator><ContentPresenter /></AdornerDecorator>
-        </ControlTemplate>
-    </Window.Template>
+<Window x:Class="WisperTranslator.App.Windows.BarWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Wisper · Trascrizione"
+        Width="760" Height="248" MinWidth="480" MaxWidth="1600"
+        WindowStyle="None" ResizeMode="NoResize"
+        ShowInTaskbar="False" ShowActivated="False"
+        WindowStartupLocation="Manual"
+        Background="#01000000"
+        FontFamily="Segoe UI" Foreground="#F3F3F6"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <!-- Finestra normale (non a strati) con sfondo quasi trasparente: è il vetro di Windows a
+         riempire la finestra, e sono gli angoli arrotondati di DWM a ritagliarlo. Il pannello
+         deve quindi riempire la finestra e usare lo stesso raggio di DWM, altrimenti resta
+         scoperto un pezzo di vetro con il bordo squadrato. -->
     <Window.Resources>
         <SolidColorBrush x:Key="BarPrimary" Color="#F3F3F6" />
         <SolidColorBrush x:Key="BarSecondary" Color="#B4B4C2" />
@@ -54,11 +51,34 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource GlassButton}">
+        <Style x:Key="PrimaryButton" TargetType="Button">
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="30" />
             <Setter Property="Foreground" Value="#FFFFFF" />
-            <Setter Property="Background" Value="#F16F55" />
+            <Setter Property="Background" Value="#FF7A59" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Primary" CornerRadius="8"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="#14FFFFFF" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Primary" Property="Background" Value="#FF7777" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Primary" Property="Background" Value="#E84F4F" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="ToolTip">
             <Setter Property="Foreground" Value="#F3F3F6" />
@@ -84,18 +104,24 @@
     </Window.Resources>
 
     <Border x:Name="Shell" CornerRadius="18" BorderThickness="1" BorderBrush="#35FFFFFF"
-            Background="#A6181821" MouseLeftButtonDown="OnShellDrag">
+            Background="#A6181821" ClipToBounds="True"
+            SizeChanged="OnShellSizeChanged"
+            PreviewMouseLeftButtonDown="OnShellMouseDown"
+            MouseMove="OnShellMouseMove"
+            PreviewMouseLeftButtonUp="OnShellMouseUp"
+            MouseEnter="OnShellMouseEnter"
+            MouseLeave="OnShellMouseLeave">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="48" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="32" />
+                <RowDefinition x:Name="HandleRowHeight" Height="48" />
+                <RowDefinition x:Name="BodyRowHeight" Height="Auto" />
+                <RowDefinition x:Name="FooterRowHeight" Height="32" />
             </Grid.RowDefinitions>
             <!-- Il blur è quello del desktop/DWM. Il gradiente aggiunge solo la tinta del vetro. -->
             <Border x:Name="Glass" Grid.RowSpan="3" CornerRadius="17" IsHitTestVisible="False">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="0.8,1">
-                        <GradientStop Color="#12FFFFFF" Offset="0" />
+                        <GradientStop Color="#0CFFFFFF" Offset="0" />
                         <GradientStop Color="#00FFFFFF" Offset="0.55" />
                         <GradientStop Color="#06000000" Offset="1" />
                     </LinearGradientBrush>
@@ -149,22 +175,23 @@
             </Grid>
 
             <Grid Grid.Row="1" x:Name="TranscriptBody" Margin="0,0,0,6">
-                <ScrollViewer x:Name="Scroller" Margin="8,0" Height="160" Focusable="False"
+                <ScrollViewer x:Name="Scroller" Margin="8,0" Focusable="False"
                               VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"
                               PanningMode="VerticalOnly">
                     <ItemsControl x:Name="CueList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border x:Name="Row" Height="76" CornerRadius="10" Margin="0,0,0,4" Padding="12,7"
-                                        Background="{Binding RowBackground}">
+                                <Border x:Name="Row" Height="76" CornerRadius="12" Margin="0,0,0,4" Padding="13,8"
+                                        Background="{Binding RowBackground}"
+                                        BorderThickness="1" BorderBrush="{Binding RowEdge}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="3" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <Border CornerRadius="1.5" Background="{Binding BadgeForeground}" Opacity="0.75"
-                                                Margin="0,3,0,3" />
-                                        <Grid Grid.Column="1" Margin="10,0,0,0">
+                                        <Border CornerRadius="1.5" Background="{Binding BadgeForeground}" Opacity="0.9"
+                                                Margin="0,4,0,4" />
+                                        <Grid Grid.Column="1" Margin="12,0,0,0">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="18" />
                                                 <RowDefinition Height="*" />
@@ -200,7 +227,7 @@
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Row="2" BorderBrush="#16FFFFFF" BorderThickness="0,1,0,0" Padding="14,0,8,0">
+            <Border x:Name="Footer" Grid.Row="2" BorderBrush="#16FFFFFF" BorderThickness="0,1,0,0" Padding="14,0,8,0">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -236,6 +263,30 @@
                     </StackPanel>
                 </Grid>
             </Border>
+
+            <!-- Modalità minimal: pillola in alto con puntini, prompt e play all'hover. -->
+            <Grid x:Name="MiniPanel" Grid.RowSpan="3" Background="Transparent" Visibility="Collapsed">
+                <StackPanel x:Name="MiniDots" Orientation="Horizontal"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                    <Ellipse Width="3" Height="3" Fill="#8A8A8E" Margin="2,0" />
+                </StackPanel>
+                <StackPanel x:Name="MiniPrompt" Orientation="Horizontal" Visibility="Collapsed"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock x:Name="MiniPromptText" Text="Premi Avvia per i sottotitoli"
+                               FontSize="13" VerticalAlignment="Center"
+                               Foreground="{DynamicResource BarSecondary}" />
+                    <Button x:Name="MiniPrimaryButton" Style="{StaticResource PrimaryButton}"
+                            Margin="10,0,0,0" Click="OnStartStopClicked"
+                            AutomationProperties.Name="Avvia o ferma la trascrizione">
+                        <ui:SymbolIcon x:Name="MiniPrimaryIcon" Symbol="Play24" FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Grid>
     </Border>
-</ui:FluentWindow>
+</Window>

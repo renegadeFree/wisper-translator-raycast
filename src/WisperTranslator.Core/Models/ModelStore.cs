@@ -33,11 +33,13 @@ public static class ModelStore
 
     public static bool IsInstalled(ModelCatalogEntry entry) => entry.ManagedByServer
         ? DirectorySize(PathFor(entry)) > 0
+        : entry.Packaging == ModelPackaging.Files ? IsFilesInstalled(entry)
         : entry.Packaging != ModelPackaging.SingleFile ? IsPackInstalled(entry)
         : File.Exists(PathFor(entry)) && new FileInfo(PathFor(entry)).Length == entry.ExpectedSizeBytes;
 
     public static long InstalledSize(ModelCatalogEntry entry) => entry.ManagedByServer
-        ? DirectorySize(PathFor(entry)) : entry.Packaging != ModelPackaging.SingleFile
+        ? DirectorySize(PathFor(entry)) : entry.Packaging == ModelPackaging.Files
+            ? DirectorySize(PathFor(entry)) : entry.Packaging != ModelPackaging.SingleFile
             ? DirectorySize(PackDirectory(entry)) : File.Exists(PathFor(entry)) ? new FileInfo(PathFor(entry)).Length : 0;
 
     public static long DirectorySize(string directory) => Directory.Exists(directory)
@@ -54,6 +56,9 @@ public static class ModelStore
         CancellationToken cancellationToken = default)
     {
         if (entry.ManagedByServer) throw new InvalidOperationException("Usa MTranServer per scaricare i modelli di traduzione.");
+        if (entry.Packaging == ModelPackaging.Files)
+            return await EnsureFilesAsync(entry, progress is null ? null : new InlineProgress<double>(
+                fraction => progress.Report((long)(fraction * entry.ExpectedSizeBytes))), cancellationToken).ConfigureAwait(false);
         if (entry.Packaging != ModelPackaging.SingleFile)
             return await EnsurePackAsync(entry, progress is null ? null : new InlineProgress<double>(
                 fraction => progress.Report((long)(fraction * entry.ExpectedSizeBytes))), cancellationToken).ConfigureAwait(false);
@@ -95,8 +100,93 @@ public static class ModelStore
     {
         if (entry.ManagedByServer) return IsInstalled(entry)
             ? (true, "Presente; integrità gestita da MTranServer") : (false, "Non installato");
+        if (entry.Packaging == ModelPackaging.Files) return await VerifyFilesAsync(entry, cancellationToken).ConfigureAwait(false);
         if (entry.Packaging == ModelPackaging.SingleFile) return await CheckFileAsync(PathFor(entry), entry, cancellationToken).ConfigureAwait(false);
         return await VerifyPackAsync(entry, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Modello multi-file (motori ONNX): ogni file si scarica e si verifica da solo.</summary>
+    public static bool IsFilesInstalled(ModelCatalogEntry entry) =>
+        entry.Files is { Count: > 0 } files && files.All(file =>
+        {
+            var path = SafePath(PathFor(entry), file.RelativePath);
+            return File.Exists(path) && (file.SizeBytes <= 0 || new FileInfo(path).Length == file.SizeBytes);
+        });
+
+    public static async Task<string> EnsureFilesAsync(ModelCatalogEntry entry, IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (entry.Files is not { Count: > 0 } files)
+        {
+            throw new InvalidOperationException($"{entry.DisplayName}: elenco dei file mancante.");
+        }
+
+        var directory = PathFor(entry);
+        var gate = Gates.GetOrAdd(directory, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (IsFilesInstalled(entry)) return directory;
+            var total = files.Sum(file => file.SizeBytes);
+            var done = 0L;
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var path = SafePath(directory, file.RelativePath);
+                if (File.Exists(path) && (file.SizeBytes <= 0 || new FileInfo(path).Length == file.SizeBytes))
+                {
+                    done += file.SizeBytes;
+                    continue;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var start = done;
+                var bytes = progress is null
+                    ? null
+                    : new InlineProgress<long>(value => progress.Report(total <= 0 ? 0 : (start + value) / (double)total));
+                await HttpDownload.DownloadVerifiedAsync(file.Url, path, file.SizeBytes, file.Sha256, bytes, cancellationToken)
+                    .ConfigureAwait(false);
+                done += file.SizeBytes;
+            }
+
+            progress?.Report(1);
+            return directory;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static async Task<(bool Ok, string Message)> VerifyFilesAsync(ModelCatalogEntry entry,
+        CancellationToken cancellationToken)
+    {
+        if (entry.Files is not { Count: > 0 } files)
+        {
+            return (false, "Elenco dei file mancante nel catalogo");
+        }
+
+        foreach (var file in files)
+        {
+            var path = SafePath(PathFor(entry), file.RelativePath);
+            if (!File.Exists(path))
+            {
+                return (false, $"Manca {Path.GetFileName(file.RelativePath)}");
+            }
+
+            if (file.SizeBytes > 0 && new FileInfo(path).Length != file.SizeBytes)
+            {
+                return (false, $"{Path.GetFileName(file.RelativePath)}: dimensione diversa dal catalogo");
+            }
+
+            var hash = await HttpDownload.ComputeSha256Async(path, cancellationToken).ConfigureAwait(false);
+            if (!hash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return (false, $"{Path.GetFileName(file.RelativePath)}: hash diverso dal catalogo");
+            }
+        }
+
+        return (true, "Integro");
     }
 
     private static async Task<(bool Ok, string Message)> VerifyPackAsync(ModelCatalogEntry entry, CancellationToken cancellationToken)
@@ -213,6 +303,12 @@ public static class ModelStore
 
     public static void Delete(ModelCatalogEntry entry)
     {
+        if (entry.Packaging == ModelPackaging.Files)
+        {
+            DeleteFiles(entry);
+            return;
+        }
+
         if (entry.Packaging != ModelPackaging.SingleFile && !entry.ManagedByServer) { DeletePack(entry); return; }
         var path = PathFor(entry);
         var gate = Gates.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
@@ -240,6 +336,18 @@ public static class ModelStore
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
             foreach (var path in new[] { PathFor(entry), PathFor(entry) + ".part" })
                 if (File.Exists(path)) File.Delete(path);
+        }
+        finally { gate.Release(); }
+    }
+
+    public static void DeleteFiles(ModelCatalogEntry entry)
+    {
+        var directory = PathFor(entry);
+        var gate = Gates.GetOrAdd(directory, _ => new SemaphoreSlim(1, 1));
+        if (!gate.Wait(0)) throw new InvalidOperationException("Attendi il completamento del download.");
+        try
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
         finally { gate.Release(); }
     }

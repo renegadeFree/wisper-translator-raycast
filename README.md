@@ -7,8 +7,10 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 
 Corretti i problemi di audio disattivato, stop dei decoder, persistenza delle traduzioni e retention;
 ridotte copie e allocazioni nei percorsi audio e aggiornamenti UI. Ricostruito il modulo Models
-mancante nella copia del progetto. La barra ora usa un layout compatto in stile Raycast, senza
-cornice standard, con Acrylic nativo e fallback opaco.
+mancante nella copia del progetto. La barra ora usa il layout finale in stile Raycast/SuperCmd,
+senza cornice standard, con l'acrilico di Windows e fallback opaco. A riposo diventa una capsula
+minimal; durante l'ascolto la frase si compone progressivamente invece di mostrare una parola
+alla volta.
 
 [Rapporto completo, misure e limiti del collaudo](docs/CODE_REVIEW.md) ·
 [Anteprima interattiva del nuovo design](docs/bar-preview.html) ·
@@ -16,11 +18,13 @@ cornice standard, con Acrylic nativo e fallback opaco.
 
 La nuova barra è implementata in WPF. L'anteprima HTML serve a ispezionare il design anche su
 questo computer; la resa DWM e la cattura audio richiedono il collaudo Windows.
-Gli screenshot nativi seguenti mostrano **la versione precedente**.
+Gli screenshot nativi seguenti sono aggiornati alla versione corrente.
 
 ![Barra fluttuante con i parlanti](docs/screenshots/barra-ascolto.png)
 
 ![Barra a riposo](docs/screenshots/barra-riposo.png)
+
+![Barra minimal in ascolto](docs/screenshots/barra-mini-ascolto.png)
 
 ![Pannello esteso](docs/screenshots/pannello.png)
 
@@ -29,11 +33,25 @@ Gli screenshot nativi seguenti mostrano **la versione precedente**.
 > Le immagini sono generate dal programma stesso (`WisperTranslator.App.exe --shot`) su frasi
 > d'esempio: non contengono lo schermo del PC né dati di nessuno.
 
+## Novità della versione 2.50
+
+- **Mai più bordo squadrato attorno alla barra**: il pannello riempie la finestra e sono gli
+  **angoli arrotondati di DWM** a ritagliare il vetro, quindi attorno alla capsula non può restare
+  il rettangolo del materiale. Il vetro è l'acrilico di Windows, che resta sfocato anche quando la
+  barra non è in primo piano; il testo resta nitido perché la finestra non è a strati.
+- **Righe delle frasi più curate**: raggio maggiore, lastra di vetro con la tinta del parlante al
+  posto del rettangolo piatto, bordo chiaro sottile e barra di accento più corta.
+- **Traduzione a due corsie**: la traduzione appare mentre parli (corsia rapida) e viene rifinita
+  a metà frase e a fine enunciato (corsia di qualità) — vedi
+  [PLAN.md](PLAN.md#18-lavorazione--traduzione-istantanea-a-due-corsie-e-barra-ridimensionabile-f34f36).
+- **Barra ridimensionabile** con slider di altezza e trasparenza del vetro (55–92%).
+
 ## Novità della versione 2.2
 
 - **Barra rifatta da zero**: non è più un ovale disegnato dentro il rettangolo acrilico di Windows.
-  La finestra viene ritagliata ad angoli arrotondati reali (`SetWindowRgn`), quindi è **un unico
-  pannello di vetro** con bordo chiaro, nessuna cornice classica e nessun secondo rettangolo sotto.
+  Il pannello riempie la finestra e sono gli **angoli arrotondati di DWM** a ritagliare il vetro,
+  quindi è **un unico pannello di vetro** con bordo chiaro, nessuna cornice classica e nessun
+  secondo rettangolo sotto.
 - **Su richiesta**: la barra resta nascosta all'avvio e compare con il pulsante **Barra** nel
   pannello, dalla tray o con `Ctrl+Alt+B`; resta finché non la nascondi. 2 frasi visibili, 5 in
   memoria, le altre con la rotellina.
@@ -48,6 +66,21 @@ Gli screenshot nativi seguenti mostrano **la versione precedente**.
 - **Numeri misurati**: su 3 voci sintetiche distinte, 9 turni con sequenza stabile
   `1,2,3,1,2,3,1,2`, finali a **0,43 s** di mediana e **0,76 s** nel caso peggiore, accuratezza ASR
   **90,6%**. Dettagli in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+- **Parziali progressivi**: i delta del WebSocket vengono accumulati per enunciato, quindi la frase
+  cresce parola dopo parola (`Good` → `Good morning.` → `Good morning. This is…`) e la frase finale
+  batch la sostituisce con la versione corretta e tradotta.
+- **Traduzione istantanea a due corsie**: la traduzione segue il parlato invece di aspettare la
+  pausa. Una corsia rapida (Bergamot, ~17 ms) traduce il parziale che cresce senza mai essere
+  annullata; una corsia di qualità (Marian opus-mt in ONNX) rifinisce la frase a metà enunciato e
+  alla fine. Su audio reale la prima traduzione compare **0–178 ms** dopo il primo parziale, con
+  circa una traduzione per ogni parziale trascritto. Dettagli e misure in
+  [PLAN.md](PLAN.md#18-lavorazione--traduzione-istantanea-a-due-corsie-e-barra-ridimensionabile-f34f36).
+- **Barra ridimensionabile e vetro regolabile**: bordi e angoli trascinabili (larghezza 480–1600 px,
+  altezza fino al 70% dello schermo), slider **Altezza barra** e **Trasparenza del vetro** (55–92%),
+  sempre con il valore visibile. Il pannello di vetro riempie la finestra: niente più fascia
+  squadrata dietro la barra.
+- **Modalità minimal**: senza sottotitoli la barra si riduce a una capsula 320×48; al primo testo
+  torna alla card completa. Si attiva/disattiva da **Impostazioni → Barra**.
 - **Screenshot senza desktop**: il comando `--shot` disegna solo le finestre dell'app su uno sfondo
   neutro, quindi nelle immagini del README non finisce niente dello schermo.
 

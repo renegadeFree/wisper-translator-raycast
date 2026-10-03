@@ -6,7 +6,7 @@ Review del 3 ottobre 2026 sulla copia fornita di Wisper Translator. Il target ri
 
 La copia iniziale non compilava: mancava completamente `src/WisperTranslator.Core/Models`. Il modulo è stato ricostruito dai suoi chiamanti, dai test esistenti e dalle fonti ufficiali dei modelli. Il pattern non ancorato `models/` del `.gitignore` poteva escludere anche questa cartella sorgente su un filesystem Windows: ora è `/models/`.
 
-La soluzione completa compila con **0 errori e 0 avvisi**. La pubblicazione autonoma `win-x64` è stata generata. I **98 test managed eseguibili sul Mac passano**; la successiva CI Windows ha superato **tutti i 101 test**, inclusi i tre PDF con font Windows, e l'autotest nativo della regione HWND arrotondata della barra. Restano i controlli su WASAPI, hotkey, decoder nativi con modelli reali e resa DWM su hardware Windows. Questo rapporto non equivale a una certificazione del comportamento su ogni PC.
+La soluzione completa compila con **0 errori e 0 avvisi**. La pubblicazione autonoma `win-x64` è stata generata. I **98 test managed eseguibili sul Mac passano**; la successiva CI Windows ha superato **tutti i 101 test**, inclusi i tre PDF con font Windows, e l'autotest della forma della barra. Restano i controlli su WASAPI, hotkey, decoder nativi con modelli reali e resa DWM su hardware Windows. Questo rapporto non equivale a una certificazione del comportamento su ogni PC.
 
 ## Problemi rilevati e corretti
 
@@ -57,7 +57,7 @@ P1 indica un problema che può impedire l'uso, perdere dati o provocare crash; P
 
 - Gli aggiornamenti dei cue sono raggruppati ogni 66 ms; il thread audio non attende più `Dispatcher.Invoke` per ogni aggiornamento.
 - La barra aggiorna gli oggetti delle righe esistenti solo quando il contenuto cambia e riusa i brush della palette. Gli overlay nascosti non vengono ricostruiti per ogni cue.
-- La regione arrotondata dell'HWND viene ricreata solo se cambiano dimensioni o DPI. Lo snap viene applicato alla fine del trascinamento.
+- Il ritaglio arrotondato del pannello viene rifatto solo quando cambia la forma della barra. Lo snap viene applicato alla fine del trascinamento.
 - Il timer del punto di stato si ferma quando la barra è nascosta, la sessione è ferma o le animazioni sono disabilitate.
 - SQLite riusa un comando parametrizzato preparato per i cue. Connessioni e dispose sono protetti dallo stesso lock; i percorsi usano `SqliteConnectionStringBuilder`.
 - Il contesto dell'assistente viene costruito fino al limite utile; ID dei nodi e riferimenti della mappa sono validati con un set, senza ricerche ripetute per ogni arco.
@@ -82,17 +82,18 @@ dotnet run --project docs/benchmarks/BufferBenchmark.csproj -c Release
 
 Implementazione reale in `BarWindow.xaml`, code-behind, `Win32` e `BarGeometry`:
 
-- Pannello scuro in stile Raycast, contorno sottile, angoli da 18 DIP, larghezza iniziale 760 DIP, due righe da 76 DIP e footer compatto. Senza cue scende a 132 DIP di altezza.
+- Pannello scuro in stile Raycast, contorno sottile, angoli da 8 DIP (lo stesso raggio che DWM dà alla finestra), larghezza iniziale 760 DIP, due righe da 76 DIP e footer compatto. Senza cue scende a 132 DIP di altezza.
 - Nessuna title bar, cornice standard, voce taskbar o Alt+Tab. Il template della finestra contiene soltanto il pannello; il codice ripristina `WindowStyle.None` dopo l'inizializzazione di FluentWindow.
-- Desktop Acrylic tramite DWM da Windows 11 build 22621. Sulle versioni precedenti compatibili viene tentato il fallback `WCA_ACCENT_POLICY`; in caso di insuccesso il fondo resta opaco e leggibile. I colori di contrasto elevato e la preferenza di trasparenza vengono rispettati.
-- Il tema globale non sostituisce il materiale della barra con Mica; il bordo OS viene nuovamente soppresso anche dopo attivazione/disattivazione.
+- Acrilico di Windows su **finestra normale** (non a strati): `CompositionTarget.BackgroundColor = Transparent` lascia vedere il materiale, che è l'acrilico dell'accent policy. Rispetto a Mica/Acrylic di DWM resta sfocato anche senza fuoco, che è la condizione normale della barra. In caso di insuccesso il fondo resta opaco e leggibile; contrasto elevato e preferenza di trasparenza vengono rispettati.
+- **Sono gli angoli arrotondati di DWM** a ritagliare il vetro: la finestra non è più ritagliata con una regione (l'acrilico la ignorava e riempiva il rettangolo, ed era quello la fascia squadrata) e il pannello usa lo stesso raggio di DWM, quindi non resta scoperto nessuno spicchio di materiale.
+- Il tema globale non sostituisce il materiale della barra; il bordo OS viene nuovamente soppresso anche dopo attivazione/disattivazione.
 - Comandi audio, microfono, traduzione, parlanti e Avvia/Ferma sempre visibili, con nomi di automazione, tooltips e focus da tastiera. Il menu `⋯` si apre anche con clic sinistro.
 - Originale secondario e traduzione principale, etichette dei parlanti e testo provvisorio completo. Animazioni brevi, nessun lampeggio periodico delle righe.
 - Ridimensionamento e snap usano l'area di lavoro del monitor corrente in pixel device, evitando il precedente vincolo al monitor principale.
 
-[Anteprima interattiva](bar-preview.html): rappresentazione HTML del layout, verificata a 480 e 760 px, a riposo, con testo originale e menu. È un'anteprima del design, **non uno screenshot WPF eseguito su Windows**. Le vecchie immagini native nella documentazione rappresentano la versione precedente.
+[Anteprima interattiva](bar-preview.html): rappresentazione HTML del layout, verificata a 480 e 760 px, a riposo, con testo originale e menu. È il riferimento visuale del design; le immagini native in `docs/screenshots` sono rigenerate da WPF con `--shot` (card completa, card ferma con cue, capsula mini a riposo e capsula mini in ascolto). La resa DWM definitiva dipende dal compositore Windows: il collaudo su questa macchina è descritto in [PLAN.md](../PLAN.md).
 
-Il significato di Desktop Acrylic e il requisito di build sono descritti nella [documentazione DWM Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type). Il fallback Windows 10 usa un attributo legacy non documentato: Microsoft [sconsiglia SetWindowCompositionAttribute](https://learn.microsoft.com/en-us/windows/win32/dwm/setwindowcompositionattribute) rispetto alle API DWM moderne. Il fallback è isolato e il suo fallimento non impedisce l'uso della barra.
+Il significato di Desktop Acrylic e il requisito di build sono descritti nella [documentazione DWM Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type); gli angoli della finestra in [DWMWA_WINDOW_CORNER_PREFERENCE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_window_corner_preference). L'acrilico arriva da `WCA_ACCENT_POLICY`, un attributo non documentato che Microsoft [sconsiglia](https://learn.microsoft.com/en-us/windows/win32/dwm/setwindowcompositionattribute) rispetto alle API DWM moderne: è isolato in `Win32.ApplyAcrylicBackdrop` e il suo fallimento lascia solo un pannello opaco, senza rompere la barra.
 
 ## Verifiche e riproduzione
 
@@ -134,7 +135,7 @@ Riferimenti: [CVE-2018-8292](https://github.com/advisories/GHSA-7jgj-8wvc-jh57),
 |---|---|---|
 | P2, modalità discreta | `HTTRANSPARENT` ha limiti fra finestre di thread differenti. Non è una garanzia di click-through verso tutte le applicazioni; header e footer rimangono interattivi. | Collaudo con browser, call e app esterne su Windows; un eventuale click-through completo richiede gestione nativa dedicata compatibile con Acrylic. |
 | P2, sessioni molto lunghe | UI e audio hanno buffer limitati, ma sessione e CLI mantengono metadati/testo dei cue per la durata della registrazione. | Misurare memoria su call di diverse ore prima di introdurre paginazione o pruning che potrebbe perdere correzioni tardive. |
-| Materiale nativo | Acrylic dipende da versione Windows, compositore e impostazioni di sistema; l'attributo legacy non garantisce stabilità futura. | Windows 10/11, tema chiaro/scuro, trasparenza disattivata, contrasto elevato, desktop remoto. |
+| Materiale nativo | L'acrilico dell'accent policy è un attributo non documentato: dipende da versione Windows, compositore e impostazioni di sistema. Gli angoli però arrivano da DWM, quindi un materiale mancante lascia un pannello opaco con la forma giusta. | Windows 10/11, tema chiaro/scuro, trasparenza disattivata, contrasto elevato, desktop remoto, DPI misti. |
 | Audio e accelerazione | Il Mac non può verificare loopback WASAPI, Vosk Windows, NeMo Windows, hotkey o CUDA/Vulkan. | Avvio, mute/riattivazione, stop durante decode, crash NeMo, cambio device, profili prestazioni su hardware Windows reale. |
 | Posizione e DPI | Resize e snap seguono il monitor corrente; il ripristino iniziale delle coordinate conserva ancora il comportamento basato sul work area principale. | Monitor secondari, DPI misti 100/150/200%, monitor rimosso e coordinate negative. |
 | Latenza totale | Nessuna nuova misura end-to-end di WER, latenza finale, CPU o GPU. | Ripetere le CLI benchmark esistenti sulla macchina Windows, incluse chiamate lunghe e rumore reale. |

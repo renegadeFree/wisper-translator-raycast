@@ -8,6 +8,7 @@ using WisperTranslator.Core.Audio;
 using WisperTranslator.Core.Hardware;
 using WisperTranslator.Core.History;
 using WisperTranslator.Core.Models;
+using WisperTranslator.Core.Session;
 using WisperTranslator.Core.Settings;
 using WisperTranslator.Core.Translation;
 using WisperTranslator.Core.Rendering;
@@ -157,13 +158,19 @@ public partial class SettingsWindow : FluentWindow
 
     // --- Barra fluttuante ---
 
+    /// <summary>Evita che righe e altezza si sovrascrivano a vicenda mentre si trascina uno slider.</summary>
+    private bool _syncingBar;
+
     private void LoadBarControls()
     {
         BarEnabledCheck.IsChecked = _settings.StartWithBar;
+        BarMiniIdleCheck.IsChecked = _settings.BarMiniIdle;
         BarAnimationsCheck.IsChecked = _settings.BarAnimations;
         BarDiscreetCheck.IsChecked = _settings.BarDiscreet;
         BarRowsRow.Value = Math.Clamp(_settings.BarRows, 1, Core.Settings.BarGeometry.MaxRows);
         BarWidthRow.Value = Core.Settings.BarGeometry.ClampWidth(_settings.BarWidth);
+        BarHeightRow.Value = Core.Settings.BarGeometry.ClampHeight(_settings.BarHeight);
+        BarOpacityRow.Value = Core.Settings.BarGeometry.ClampOpacity(_settings.BarOpacity);
         BarBufferRow.Value = _settings.BarBuffer;
 
         BarTextBox.ItemsSource = new[] { "Originale e traduzione", "Solo originale", "Solo traduzione" };
@@ -179,10 +186,34 @@ public partial class SettingsWindow : FluentWindow
         }
 
         _settings.StartWithBar = BarEnabledCheck.IsChecked == true;
+        _settings.BarMiniIdle = BarMiniIdleCheck.IsChecked == true;
         _settings.BarAnimations = BarAnimationsCheck.IsChecked == true;
         _settings.BarDiscreet = BarDiscreetCheck.IsChecked == true;
-        _settings.BarRows = Math.Clamp((int)Math.Round(BarRowsRow.Value), 1, Core.Settings.BarGeometry.MaxRows);
+        var rows = Math.Clamp((int)Math.Round(BarRowsRow.Value), 1, Core.Settings.BarGeometry.MaxRows);
+        if (!_syncingBar)
+        {
+            _syncingBar = true;
+            if (ReferenceEquals(sender, BarHeightRow))
+            {
+                // L'altezza si trascina libera: le frasi visibili si adeguano a quante ce ne stanno.
+                _settings.BarHeight = Core.Settings.BarGeometry.ClampHeight(BarHeightRow.Value);
+                rows = Core.Settings.BarGeometry.RowsForHeight(_settings.BarHeight);
+                BarRowsRow.Value = rows;
+            }
+            else
+            {
+                // Le frasi visibili sono righe intere: l'altezza si adegua di conseguenza.
+                _settings.BarHeight = Core.Settings.BarGeometry.HeightForRows(rows);
+                BarHeightRow.Value = Math.Clamp(_settings.BarHeight,
+                    BarHeightRow.Minimum, BarHeightRow.Maximum);
+            }
+
+            _syncingBar = false;
+        }
+
+        _settings.BarRows = rows;
         _settings.BarWidth = Core.Settings.BarGeometry.ClampWidth(BarWidthRow.Value);
+        _settings.BarOpacity = Core.Settings.BarGeometry.ClampOpacity(BarOpacityRow.Value);
         _settings.BarBuffer = Math.Max((int)Math.Round(BarBufferRow.Value), _settings.BarRows);
         _settings.BarText = (BarTextMode)Math.Clamp(BarTextBox.SelectedIndex, 0, 2);
 
@@ -193,9 +224,11 @@ public partial class SettingsWindow : FluentWindow
     private void RefreshBarPreview()
     {
         BarPreviewText.Text =
-            $"La barra è larga {_settings.BarWidth:F0} px e mostra {_settings.BarRows} frasi per volta, "
-            + $"su {_settings.BarBuffer} in memoria: le altre {Math.Max(0, _settings.BarBuffer - _settings.BarRows)} "
-            + "restano sotto, raggiungibili con la rotellina. Si mostra con Ctrl+Alt+B."
+            $"La barra è {_settings.BarWidth:F0}×{_settings.BarHeight:F0} px, vetro al {_settings.BarOpacity:P0}: "
+            + $"mostra {_settings.BarRows} frasi per volta, su {_settings.BarBuffer} in memoria; "
+            + $"le altre {Math.Max(0, _settings.BarBuffer - _settings.BarRows)} restano sotto, "
+            + "raggiungibili con la rotellina. Si ridimensiona trascinando bordi e angoli e si mostra con Ctrl+Alt+B."
+            + (_settings.BarMiniIdle ? " A riposo diventa una pillola minimal." : string.Empty)
             + (_settings.BarDiscreet ? " Modalità discreta attiva." : string.Empty);
     }
 
@@ -240,6 +273,16 @@ public partial class SettingsWindow : FluentWindow
             .First(option => option.Value == _settings.FinalBackend);
         UpdatePresetHint();
 
+        TranslationQualityBox.ItemsSource = new[]
+        {
+            new QualityOption(QualityTranslationMode.Auto, "Automatica — attiva sui PC che la reggono"),
+            new QualityOption(QualityTranslationMode.Off, "Spenta — solo corsia rapida"),
+            new QualityOption(QualityTranslationMode.Forced, "Sempre — anche su PC deboli"),
+        };
+        TranslationQualityBox.SelectedItem = ((IEnumerable<QualityOption>)TranslationQualityBox.ItemsSource)
+            .First(option => option.Value == _settings.QualityTranslation);
+        RefreshQualityHint();
+
         GpuBox.ItemsSource = new[]
         {
             new GpuOption(GpuRuntime.Nessuno, "Solo CPU (consigliato)"),
@@ -265,6 +308,78 @@ public partial class SettingsWindow : FluentWindow
     private void OnAppearanceChanged(object sender, RoutedEventArgs e) => ApplyAppearance();
 
     private void OnAppearanceChanged(object sender, EventArgs e) => ApplyAppearance();
+
+    // --- Traduzione a due corsie ---
+
+    private void OnTranslationQualityChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _settings.QualityTranslation = (TranslationQualityBox.SelectedItem as QualityOption)?.Value
+                                       ?? QualityTranslationMode.Auto;
+        RefreshQualityHint();
+        _onChanged();
+    }
+
+    /// <summary>Stato reale dei modelli di rifinitura: quanto pesano e se sono pronti.</summary>
+    private void RefreshQualityHint()
+    {
+        if (TranslationQualityHint is null)
+        {
+            return;
+        }
+
+        var italian = ModelCatalog.OpusMtItalianEnglish;
+        var english = ModelCatalog.OpusMtEnglishItalian;
+        var installed = ModelStore.IsInstalled(italian) && ModelStore.IsInstalled(english);
+        var size = ModelStore.InstalledSize(italian) + ModelStore.InstalledSize(english);
+        TranslationQualityHint.Text =
+            "La corsia rapida (Bergamot) traduce subito il parziale che cresce; il secondo stadio "
+            + "rifinisce la frase a metà enunciato e alla fine con un modello Marian più grande. "
+            + (installed
+                ? $"Modelli pronti ({size / (1024.0 * 1024):F0} MB)."
+                : "Modelli non installati: senza di essi resta attiva solo la corsia rapida.")
+            + " Costa circa 400 MB di RAM in più, solo mentre è in uso.";
+    }
+
+    private async void OnDownloadQualityModelsClicked(object sender, RoutedEventArgs e)
+    {
+        ModelStatusText.Text = "Scarico i modelli di rifinitura...";
+        ModelProgress.Visibility = Visibility.Visible;
+        ModelProgress.Value = 0;
+        try
+        {
+            var entries = new[] { ModelCatalog.OpusMtItalianEnglish, ModelCatalog.OpusMtEnglishItalian };
+            var total = entries.Sum(entry => entry.ExpectedSizeBytes);
+            var done = 0L;
+            IProgress<long> progress = new Progress<long>(bytes =>
+            {
+                var fraction = total <= 0 ? 0 : Math.Clamp((done + bytes) / (double)total, 0, 1);
+                ModelProgress.Value = fraction * 100;
+                ModelStatusText.Text = $"Scarico i modelli di rifinitura... {fraction:P0}";
+            });
+            foreach (var entry in entries)
+            {
+                await ModelStore.EnsureAsync(entry, progress);
+                done += entry.ExpectedSizeBytes;
+            }
+
+            ModelStatusText.Text = "Modelli di rifinitura installati.";
+        }
+        catch (Exception exception)
+        {
+            ModelStatusText.Text = $"Errore: {exception.Message}";
+        }
+        finally
+        {
+            ModelProgress.Visibility = Visibility.Collapsed;
+            RefreshQualityHint();
+            RefreshModels();
+        }
+    }
 
     private static IReadOnlyList<BackendOption> BackendOptions() =>
     [
@@ -911,7 +1026,8 @@ public partial class SettingsWindow : FluentWindow
                     entry.DisplayName,
                     size > 0 ? InstalledModel.FormatSize(size) : "non installato",
                     $"{entry.License} · tier {entry.Tier}"
-                    + (entry.Packaging == ModelPackaging.SingleFile ? string.Empty : " · pacchetto")
+                    + (entry.Packaging == ModelPackaging.SingleFile ? string.Empty
+                        : entry.Packaging == ModelPackaging.Files ? " · file multipli" : " · pacchetto")
                     + (installed ? " · installato" : string.Empty)
                     + (entry.ManagedByServer ? " · gestito dal server" : string.Empty),
                     entry.About);
@@ -962,7 +1078,7 @@ public partial class SettingsWindow : FluentWindow
                     return "Modelli di traduzione scaricati.";
                 }
 
-                if (row.Entry.Packaging == ModelPackaging.SingleFile)
+                if (row.Entry.Packaging is ModelPackaging.SingleFile or ModelPackaging.Files)
                 {
                     await ModelStore.EnsureAsync(row.Entry, progress);
                 }
@@ -1078,6 +1194,8 @@ public partial class SettingsWindow : FluentWindow
         string Size,
         string Detail,
         string About);
+
+    private sealed record QualityOption(QualityTranslationMode Value, string Label);
 
     private void RefreshHistory()
     {

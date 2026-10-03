@@ -34,21 +34,18 @@ public sealed record BarState(
     string SpeakerHint);
 
 /// <summary>
-/// Pannello di vetro fluttuante: la finestra è ritagliata ad angoli arrotondati e l'acrilico
-/// riempie esattamente quella forma. Non possiede la sessione: la comanda il pannello.
+/// Pannello di vetro fluttuante: la finestra è a strati, quindi la sua forma è l'alfa dei pixel
+/// disegnati e l'acrilico di Windows riempie esattamente quella forma. Non possiede la sessione:
+/// la comanda il pannello.
 /// </summary>
-public partial class BarWindow : FluentWindow
+public partial class BarWindow : Window
 {
     private const double SnapDistance = 16;
     private const int WmSize = 0x0005;
     private const int WmNcHitTest = 0x0084;
-    private const int WmSizing = 0x0214;
     private const int WmExitSizeMove = 0x0232;
     private const int WmDpiChanged = 0x02E0;
     private const int HtTransparent = -1;
-    private const int WmszLeft = 1;
-    private const int WmszTopLeft = 4;
-    private const int WmszBottomLeft = 7;
 
     private static readonly Color Coral = Color.FromRgb(0xFF, 0x7A, 0x59);
     private static readonly Color StopColor = Color.FromRgb(0xFF, 0x5A, 0x5A);
@@ -63,12 +60,24 @@ public partial class BarWindow : FluentWindow
     private HwndSource? _source;
     private bool _shot;
     private bool _forceClose;
+    private bool _mini;
+    private bool? _shotMini;
+    private bool _shellHover;
+    private bool _dragCandidate;
+    private bool _dragged;
+    private Point _dragStart;
+    private BarGeometry.Edges _resizing;
+    private Point _resizeStartScreen;
+    private double _resizeScale = 1;
+    private (double Left, double Top, double Width, double Height) _resizeOrigin;
     private int _lastTopId = -1;
     private double _level;
     private bool _running;
     private bool _hasCues;
-    private (int Width, int Height, int Diameter) _region;
+    private bool _acrylic;
     private static readonly Brush TextBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF6)));
+    private static readonly Brush MutedBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xB4, 0xB4, 0xC2)));
+    private static readonly Brush OffBrush = Freeze(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x86)));
 
     public BarWindow(AppSettings settings)
     {
@@ -88,7 +97,7 @@ public partial class BarWindow : FluentWindow
         _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
         _pulseTimer.Tick += (_, _) => TickPulse();
 
-        Loaded += (_, _) => { ApplyMaterial(); ApplyWindowRegion(); UpdatePulseTimer(); };
+        Loaded += (_, _) => { ApplyMaterial(); ApplyShellClip(); UpdatePulseTimer(); };
         IsVisibleChanged += (_, _) =>
         {
             UpdatePulseTimer();
@@ -130,56 +139,157 @@ public partial class BarWindow : FluentWindow
 
     public event Action? HideRequested;
 
-    /// <summary>Righe visibili, larghezza, altezza e raggio: tutto dipende dalle impostazioni.</summary>
+    /// <summary>Larghezza, altezza e raggio: tutto dipende dalle impostazioni e dai trascinamenti.</summary>
     public void ApplyLayout()
     {
-        var rows = Math.Clamp(_settings.BarRows, 1, BarGeometry.MaxRows);
-        var width = BarGeometry.ClampWidth(_settings.BarWidth);
-        var height = _hasCues ? BarGeometry.WindowHeight(rows)
-            : BarGeometry.HandleHeight + BarGeometry.IdleHeight + BarGeometry.FooterHeight + BarGeometry.BottomPadding;
-        var radius = BarGeometry.CornerRadius(height);
+        var mini = _shotMini ?? (_settings.BarMiniIdle && !_hasCues && !_running);
+        _mini = mini;
+        var center = IsVisible && ActualWidth > 1 ? (double?)(Left + (ActualWidth / 2)) : null;
 
-        Scroller.Height = _hasCues ? BarGeometry.ViewportHeight(rows) : BarGeometry.IdleHeight;
         // Il tema impone un'altezza minima da finestra d'applicazione: qui la barra decide da sé.
         MinHeight = 0;
         MaxHeight = double.PositiveInfinity;
-        MinWidth = BarGeometry.MinWidth;
-        MaxWidth = BarGeometry.MaxWidth;
-        Width = width;
-        Height = height;
-        MinHeight = MaxHeight = height;
-        Shell.CornerRadius = new CornerRadius(radius);
-        Glass.CornerRadius = new CornerRadius(Math.Max(0, radius - 1));
-        ApplyWindowRegion();
+        MinWidth = 0;
+        MaxWidth = double.PositiveInfinity;
+        if (mini)
+        {
+            Scroller.Height = 0;
+            MinWidth = MaxWidth = BarGeometry.MiniWidth;
+            Width = BarGeometry.MiniWidth;
+            Height = BarGeometry.MiniHeight;
+            Shell.CornerRadius = new CornerRadius(BarGeometry.MiniRadius);
+            Glass.CornerRadius = new CornerRadius(BarGeometry.MiniRadius - 1);
+            HandleRow.Visibility = Visibility.Collapsed;
+            TranscriptBody.Visibility = Visibility.Collapsed;
+            Footer.Visibility = Visibility.Collapsed;
+            HandleRowHeight.Height = new GridLength(1, GridUnitType.Star);
+            BodyRowHeight.Height = new GridLength(0);
+            FooterRowHeight.Height = new GridLength(0);
+            MiniPanel.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            var width = BarGeometry.ClampWidth(_settings.BarWidth);
+            var height = MaxHeightForWorkArea(BarGeometry.ClampHeight(_settings.BarHeight));
+            var radius = BarGeometry.CornerRadius(height);
+            // Il corpo prende tutto lo spazio rimasto: le frasi che non ci stanno si scorrono.
+            Scroller.Height = double.NaN;
+            MinWidth = BarGeometry.MinWidth;
+            MaxWidth = BarGeometry.MaxWidth;
+            Width = width;
+            Height = height;
+            Shell.CornerRadius = new CornerRadius(radius);
+            Glass.CornerRadius = new CornerRadius(Math.Max(0, radius - 1));
+            HandleRow.Visibility = Visibility.Visible;
+            TranscriptBody.Visibility = Visibility.Visible;
+            Footer.Visibility = Visibility.Visible;
+            HandleRowHeight.Height = new GridLength(BarGeometry.HandleHeight);
+            BodyRowHeight.Height = new GridLength(1, GridUnitType.Star);
+            FooterRowHeight.Height = new GridLength(BarGeometry.FooterHeight);
+            MiniPanel.Visibility = Visibility.Collapsed;
+        }
+
+        MinHeight = MaxHeight = Height;
+        MinWidth = MaxWidth = Width;
+        if (center is { } anchor)
+        {
+            Left = anchor - (Width / 2);
+        }
+
+        ClampToWorkArea();
+        UpdateMiniVisual();
+        ApplyOpacity();
+        ApplyShellClip();
+    }
+
+    /// <summary>Altezza massima reale: il 70% dell'area di lavoro, mai sotto il minimo.</summary>
+    private static double MaxHeightForWorkArea(double height) =>
+        Math.Min(height, BarGeometry.MaxHeightFor(SystemParameters.WorkArea.Height));
+
+    /// <summary>La tinta del vetro segue lo slider: più bassa, più acrilico si vede dietro.</summary>
+    private void ApplyOpacity()
+    {
+        if (_shot) return;
+        if (SystemParameters.HighContrast)
+        {
+            Shell.Background = SystemColors.WindowBrush;
+            return;
+        }
+
+        // Con il vetro attivo il pannello è solo un velo: la tinta la porta l'acrilico.
+        var veil = _acrylic ? BarGeometry.PanelVeil(_settings.BarOpacity) : 0.96;
+        var alpha = (byte)Math.Round(veil * 255);
+        Shell.Background = Freeze(new SolidColorBrush(Color.FromArgb(alpha, 0x18, 0x18, 0x21)));
+    }
+
+    private void ClampToWorkArea()
+    {
+        var area = SystemParameters.WorkArea;
+        Left = Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width));
+        Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
+    }
+
+    private void ApplyShellClip()
+    {
+        if (Shell.ActualWidth <= 1 || Shell.ActualHeight <= 1)
+        {
+            return;
+        }
+
+        var radius = _mini
+            ? BarGeometry.MiniRadius
+            : BarGeometry.CornerRadius(Shell.ActualHeight);
+        Shell.Clip = new RectangleGeometry(
+            new Rect(0, 0, Shell.ActualWidth, Shell.ActualHeight),
+            radius,
+            radius);
+    }
+
+    private void OnShellSizeChanged(object sender, SizeChangedEventArgs e) => ApplyShellClip();
+
+    private void UpdateMiniVisual()
+    {
+        if (!_mini)
+        {
+            return;
+        }
+
+        MiniDots.Visibility = _shellHover ? Visibility.Collapsed : Visibility.Visible;
+        MiniPrompt.Visibility = _shellHover ? Visibility.Visible : Visibility.Collapsed;
+        MiniPromptText.Text = _running ? "In ascolto…" : "Premi Avvia per i sottotitoli";
+        MiniPrimaryIcon.Symbol = _running ? SymbolRegular.Stop24 : SymbolRegular.Play24;
+        MiniPrimaryButton.Background = _running ? StopBrush : CoralBrush;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        // FluentWindow ripristina SingleBorderWindow durante l'inizializzazione.
+        // Il tema dell'applicazione può ripristinare lo stile con cornice durante l'inizializzazione.
         WindowStyle = WindowStyle.None;
         Win32.MakeFloatingBar(this);
         _source = HwndSource.FromHwnd(Win32.Handle(this));
+        // Senza questo WPF dipinge il proprio rettangolo opaco e il vetro di Windows non si vede:
+        // è il pezzo che permette a un acrilico "di sistema" di comparire in una finestra normale.
+        if (_source?.CompositionTarget is not null)
+        {
+            _source.CompositionTarget.BackgroundColor = Colors.Transparent;
+        }
+
         _source?.AddHook(WndProc);
-        ApplyWindowRegion();
     }
 
     protected override void OnActivated(EventArgs e)
     {
         base.OnActivated(e);
+        WindowStyle = WindowStyle.None;
         Win32.MakeFloatingBar(this);
     }
 
     protected override void OnDeactivated(EventArgs e)
     {
         base.OnDeactivated(e);
+        WindowStyle = WindowStyle.None;
         Win32.MakeFloatingBar(this);
-    }
-
-    protected override void OnBackdropTypeChanged(WindowBackdropType oldValue, WindowBackdropType newValue)
-    {
-        // Il tema globale applica Mica alle finestre: questa barra conserva il suo Acrylic.
-        if (IsLoaded) ApplyMaterial();
     }
 
     private void ApplyMaterial()
@@ -194,15 +304,18 @@ public partial class BarWindow : FluentWindow
         }
         catch (System.Security.SecurityException) { transparent = false; }
 
-        WindowBackdrop.RemoveBackdrop(this);
-        WindowBackdrop.RemoveBackground(this);
-        WindowBackdrop.RemoveTitlebarBackground(this);
-        Win32.SetLegacyAcrylic(this, false);
-        var acrylic = transparent && (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)
-            ? WindowBackdrop.ApplyBackdrop(Win32.Handle(this), WindowBackdropType.Acrylic)
-            : Win32.SetLegacyAcrylic(this, true));
-        Shell.Background = SystemParameters.HighContrast ? SystemColors.WindowBrush
-            : Freeze(new SolidColorBrush(Color.FromArgb(acrylic ? (byte)0xA6 : (byte)0xFF, 0x18, 0x18, 0x21)));
+        // Vetro di Windows: acrilico sfocato + angoli arrotondati della finestra, così il
+        // materiale non può più disegnare il rettangolo attorno al pannello.
+        var tint = (byte)Math.Round(BarGeometry.AcrylicTint(_settings.BarOpacity) * 255);
+        _acrylic = transparent && Win32.ApplyAcrylicBackdrop(this, tint, 0x18, 0x18, 0x21);
+        if (!_acrylic)
+        {
+            Win32.ClearAcrylicBackdrop(this);
+        }
+
+        if (SystemParameters.HighContrast) Shell.Background = SystemColors.WindowBrush;
+        else if (!_acrylic) Shell.Background = Freeze(new SolidColorBrush(Color.FromRgb(0x18, 0x18, 0x21)));
+        else ApplyOpacity();
         Glass.Opacity = SystemParameters.HighContrast ? 0 : 1;
         Resources["BarPrimary"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : TextBrush;
         Resources["BarSecondary"] = SystemParameters.HighContrast ? SystemColors.WindowTextBrush
@@ -211,36 +324,7 @@ public partial class BarWindow : FluentWindow
             : Freeze(new SolidColorBrush(Color.FromRgb(0x92, 0x92, 0xA3)));
         foreach (var row in _rows) row.RefreshColors();
         Win32.MakeFloatingBar(this);
-    }
-
-    /// <summary>
-    /// Il trucco che elimina il rettangolo: la regione dell'HWND è un rettangolo arrotondato,
-    /// quindi l'acrilico non può disegnare i quattro angoli fuori dalla forma.
-    /// </summary>
-    private void ApplyWindowRegion()
-    {
-        if (_source is null && Win32.Handle(this) == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var dpi = 1.0;
-        try
-        {
-            dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        }
-        catch (Exception)
-        {
-            // prima della presentazione si usa il fattore standard
-        }
-
-        var width = ActualWidth > 1 ? ActualWidth : Width;
-        var height = ActualHeight > 1 ? ActualHeight : Height;
-        var radius = BarGeometry.CornerRadius(height);
-        var diameter = BarGeometry.RegionDiameter(radius, dpi);
-        var region = ((int)Math.Round(width * dpi), (int)Math.Round(height * dpi), diameter);
-        if (_region == region) return;
-        if (Win32.ApplyRoundedRegion(this, region.Item1, region.Item2, diameter)) _region = region;
+        ApplyShellClip();
     }
 
     /// <summary>
@@ -261,6 +345,15 @@ public partial class BarWindow : FluentWindow
         CueList.RenderTransform = Transform.Identity;
     }
 
+    /// <summary>Prepara la barra per una foto: pillola o card, con hover simulato se serve.</summary>
+    public void PrepareShot(bool mini, bool hover)
+    {
+        _shotMini = mini;
+        _shellHover = hover;
+        ApplyLayout();
+        UpdateMiniVisual();
+    }
+
     /// <summary>
     /// Aggiorna frasi e controlli. L'elenco viene aggiornato in place: con i parziali rapidi
     /// svuotarlo a ogni tick faceva lampeggiare e scattare la barra.
@@ -270,7 +363,9 @@ public partial class BarWindow : FluentWindow
         var buffer = Math.Clamp(_settings.BarBuffer, 3, 8);
         var count = Math.Min(buffer, cues.Count);
         var hasCues = count > 0;
-        if (_hasCues != hasCues)
+        _running = state.Running;
+        var wantMini = _shotMini ?? (_settings.BarMiniIdle && !hasCues && !_running);
+        if (_hasCues != hasCues || _mini != wantMini)
         {
             _hasCues = hasCues;
             ApplyLayout();
@@ -298,13 +393,14 @@ public partial class BarWindow : FluentWindow
             _lastTopId = -1;
         }
 
-        _running = state.Running;
         UpdatePulseTimer();
+        UpdateMiniVisual();
         DirectionLabel.Text = state.SourceLanguage == "it" ? "IT → EN" : "EN → IT";
         ModeLabel.Text = _settings.Translate ? " · Traduzione" : " · Solo trascrizione";
         PrimaryButton.IsEnabled = !state.Status.StartsWith("Preparo", StringComparison.Ordinal)
             && !state.Status.StartsWith("Avvio", StringComparison.Ordinal)
             && !state.Status.StartsWith("Scarico", StringComparison.Ordinal);
+        MiniPrimaryButton.IsEnabled = PrimaryButton.IsEnabled;
         StatusLabel.Text = state.Running
             ? "In ascolto"
             : state.Status.Length > 0 ? state.Status : "Pronto";
@@ -336,14 +432,22 @@ public partial class BarWindow : FluentWindow
 
     private static void SetControlState(Button button, bool active)
     {
-        button.Foreground = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : active ? TextBrush : Brushes.Gray;
+        button.Foreground = SystemParameters.HighContrast
+            ? SystemColors.WindowTextBrush
+            : active ? TextBrush : OffBrush;
         button.Background = active ? RowBrush : Brushes.Transparent;
     }
 
     /// <summary>Tutto il contenuto della riga già pronto: il template non decide niente.</summary>
     private sealed class CueView : INotifyPropertyChanged
     {
-        private static readonly Dictionary<int, (Brush Background, Brush Foreground)> SpeakerBrushes = [];
+        private static readonly Dictionary<int, (Brush Background, Brush Foreground, Brush Row)> SpeakerBrushes = [];
+        private static readonly Brush RowEdgeBrush = Freeze(new LinearGradientBrush(
+            Color.FromArgb(0x1E, 0xFF, 0xFF, 0xFF),
+            Color.FromArgb(0x06, 0xFF, 0xFF, 0xFF),
+            new Point(0, 0),
+            new Point(0, 1)));
+        private Brush _rowBackground = RowBrush;
         private Cue? _cue;
         private BarTextMode _mode;
 
@@ -358,15 +462,20 @@ public partial class BarWindow : FluentWindow
         public string SpeakerLabel => _cue?.SpeakerLabel ?? string.Empty;
         public Brush BadgeBackground { get; private set; } = Brushes.Transparent;
         public Brush BadgeForeground { get; private set; } = Brushes.Gray;
-        public Brush RowBackground => RowBrush;
+        public Brush RowBackground => SystemParameters.HighContrast ? RowBrush : _rowBackground;
+        public Brush RowEdge => SystemParameters.HighContrast ? Brushes.Transparent : RowEdgeBrush;
         public bool HasSpeaker => _cue?.HasSpeaker ?? false;
         public bool HasOriginal => Original.Length > 0;
         public bool HasMain => Main.Length > 0;
 
         public void RefreshColors()
         {
-            MainBrush = SystemParameters.HighContrast ? SystemColors.WindowTextBrush
-                : _cue is { IsFinal: false, Translation.Length: 0 } ? CoralBrush : TextBrush;
+            MainBrush = MainBrushFor(_cue);
+            if (!SystemParameters.HighContrast && _cue is { } cue && Palette(cue.Speaker) is { } brushes)
+            {
+                _rowBackground = brushes.Row;
+            }
+
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
         }
 
@@ -381,23 +490,50 @@ public partial class BarWindow : FluentWindow
             Main = mode != BarTextMode.Originale && cue.Translation.Length > 0 ? cue.Translation : original;
             Trail = mode != BarTextMode.Originale && cue.Translation.Length > 0 && !cue.IsFinal
                 ? " " + cue.ProvisionalTail : string.Empty;
-            MainBrush = SystemParameters.HighContrast ? SystemColors.WindowTextBrush
-                : !cue.IsFinal && cue.Translation.Length == 0 ? CoralBrush : TextBrush;
+            MainBrush = MainBrushFor(cue);
 
             // Il colore dipende dalla palette (8 voci + Tu/sconosciuto), non dall'id illimitato.
-            var paletteKey = cue.Speaker > 0 ? (cue.Speaker - 1) % 8 + 1 : cue.Speaker;
-            if (!SpeakerBrushes.TryGetValue(paletteKey, out var brushes))
-            {
-                var color = (Color)ColorConverter.ConvertFromString(Speakers.Color(paletteKey));
-                brushes = (Freeze(new SolidColorBrush(Color.FromArgb(0x22, color.R, color.G, color.B))),
-                    Freeze(new SolidColorBrush(color)));
-                SpeakerBrushes[paletteKey] = brushes;
-            }
-
-            BadgeBackground = brushes.Background;
-            BadgeForeground = brushes.Foreground;
+            var brushes = Palette(cue.Speaker);
+            BadgeBackground = brushes?.Background ?? Brushes.Transparent;
+            BadgeForeground = brushes?.Foreground ?? Brushes.Gray;
+            _rowBackground = brushes?.Row ?? RowBrush;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
         }
+
+        /// <summary>
+        /// Pennelli di un parlante, costruiti una volta sola: il testo usa il colore pieno, la
+        /// targhetta una sua velatura e la riga una lastra di vetro con la stessa tinta.
+        /// </summary>
+        private static (Brush Background, Brush Foreground, Brush Row)? Palette(int speaker)
+        {
+            var key = speaker > 0 ? (speaker - 1) % 8 + 1 : speaker;
+            if (SpeakerBrushes.TryGetValue(key, out var brushes))
+            {
+                return brushes;
+            }
+
+            var color = (Color)ColorConverter.ConvertFromString(Speakers.Color(key));
+            brushes = (
+                Freeze(new SolidColorBrush(Color.FromArgb(0x22, color.R, color.G, color.B))),
+                Freeze(new SolidColorBrush(color)),
+                Freeze(new LinearGradientBrush(
+                    Color.FromArgb(0x1F, color.R, color.G, color.B),
+                    Color.FromArgb(0x0A, color.R, color.G, color.B),
+                    new Point(0, 0),
+                    new Point(0, 1))));
+            SpeakerBrushes[key] = brushes;
+            return brushes;
+        }
+
+        /// <summary>
+        /// Testo ancora senza traduzione = corallo; traduzione provvisoria della corsia rapida =
+        /// grigio chiaro, così si vede arrivare; frase definitiva = bianco pieno.
+        /// </summary>
+        private static Brush MainBrushFor(Cue? cue) => SystemParameters.HighContrast
+            ? SystemColors.WindowTextBrush
+            : cue is { IsFinal: false } partial
+                ? partial.Translation.Length == 0 ? CoralBrush : MutedBrush
+                : TextBrush;
     }
 
     private void RestorePlacement()
@@ -423,13 +559,62 @@ public partial class BarWindow : FluentWindow
         else if (Math.Abs(work.Bottom - bounds.Bottom) < distance) Top += (work.Bottom - bounds.Bottom) / dpi;
     }
 
-    private void OnShellDrag(object sender, MouseButtonEventArgs e)
+    private void OnShellMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState != MouseButtonState.Pressed)
+        if (IsInteractive(e.OriginalSource))
         {
             return;
         }
 
+        var position = e.GetPosition(this);
+        var edge = _mini
+            ? BarGeometry.Edges.None
+            : BarGeometry.EdgeAt(position.X, position.Y, Width, Height);
+        if (edge != BarGeometry.Edges.None)
+        {
+            _resizing = edge;
+            _resizeStartScreen = PointToScreen(position);
+            _resizeScale = ScreenUnitScale();
+            _resizeOrigin = (Left, Top, Width, Height);
+            e.Handled = true;
+            Shell.CaptureMouse();
+            return;
+        }
+
+        _dragCandidate = true;
+        _dragged = false;
+        _dragStart = position;
+        Shell.CaptureMouse();
+    }
+
+    private void OnShellMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_resizing != BarGeometry.Edges.None)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                FinishResize();
+                return;
+            }
+
+            ResizeTo(e.GetPosition(this));
+            return;
+        }
+
+        if (!_dragCandidate || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(this) - _dragStart;
+        if (Math.Abs(delta.X) < 4 && Math.Abs(delta.Y) < 4)
+        {
+            return;
+        }
+
+        _dragCandidate = false;
+        _dragged = true;
+        Shell.ReleaseMouseCapture();
         try
         {
             DragMove();
@@ -438,16 +623,119 @@ public partial class BarWindow : FluentWindow
         {
             // il trascinamento è già terminato
         }
-        finally
+
+        SnapToEdges();
+        _settings.BarLeft = Left;
+        _settings.BarTop = Top;
+        if (!_shot)
         {
-            SnapToEdges();
-            _settings.BarLeft = Left;
-            _settings.BarTop = Top;
-            if (!_shot)
-            {
-                _settings.Save();
-            }
+            _settings.Save();
         }
+    }
+
+    private void OnShellMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_resizing != BarGeometry.Edges.None)
+        {
+            FinishResize();
+            return;
+        }
+
+        var click = _dragCandidate && !_dragged;
+        _dragCandidate = false;
+        _dragged = false;
+        Shell.ReleaseMouseCapture();
+        if (click && _mini)
+        {
+            StartStopRequested?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Quanti pixel di schermo vale un punto della finestra: <c>PointToScreen</c> cambia unità
+    /// con il DPI, e senza questa calibrazione il trascinamento andrebbe a metà velocità.
+    /// </summary>
+    private double ScreenUnitScale()
+    {
+        try
+        {
+            var unit = PointToScreen(new Point(100, 0)).X - PointToScreen(new Point(0, 0)).X;
+            var scale = unit / 100.0;
+            return scale > 0.01 ? scale : 1.0;
+        }
+        catch (InvalidOperationException)
+        {
+            return 1.0;
+        }
+    }
+
+    /// <summary>Larghezza e altezza libere entro i limiti; il bordo opposto resta fermo.</summary>
+    private void ResizeTo(Point position)
+    {
+        var current = PointToScreen(position);
+        var dx = (current.X - _resizeStartScreen.X) / _resizeScale;
+        var dy = (current.Y - _resizeStartScreen.Y) / _resizeScale;
+        var area = SystemParameters.WorkArea;
+        var (left, top, width, height) = BarGeometry.Resize(
+            _resizeOrigin.Left, _resizeOrigin.Top, _resizeOrigin.Width, _resizeOrigin.Height,
+            _resizing, dx, dy, area.Left, area.Top, area.Width, area.Height);
+
+        MinWidth = 0;
+        MaxWidth = double.PositiveInfinity;
+        MinHeight = 0;
+        MaxHeight = double.PositiveInfinity;
+        Width = width;
+        Height = height;
+        Left = left;
+        Top = top;
+        MinWidth = MaxWidth = Width;
+        MinHeight = MaxHeight = Height;
+    }
+
+    /// <summary>Fine del trascinamento: la misura scelta diventa la misura salvata.</summary>
+    private void FinishResize()
+    {
+        _resizing = BarGeometry.Edges.None;
+        Shell.ReleaseMouseCapture();
+        _settings.BarWidth = BarGeometry.ClampWidth(Width);
+        _settings.BarHeight = Math.Min(BarGeometry.ClampHeight(Height), BarGeometry.MaxHeightFor(SystemParameters.WorkArea.Height));
+        _settings.BarRows = BarGeometry.RowsForHeight(_settings.BarHeight);
+        _settings.BarLeft = Left;
+        _settings.BarTop = Top;
+        if (!_shot)
+        {
+            _settings.Save();
+        }
+
+        ApplyLayout();
+    }
+
+    private void OnShellMouseEnter(object sender, MouseEventArgs e)
+    {
+        _shellHover = true;
+        UpdateMiniVisual();
+    }
+
+    private void OnShellMouseLeave(object sender, MouseEventArgs e)
+    {
+        _shellHover = false;
+        UpdateMiniVisual();
+    }
+
+    private static bool IsInteractive(object source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is Button)
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     // --- Animazioni ---
@@ -516,6 +804,7 @@ public partial class BarWindow : FluentWindow
         {
             _pulseTimer.Stop();
             if (StatusDot.RenderTransform is ScaleTransform scale) scale.ScaleX = scale.ScaleY = 1;
+            MiniDots.Opacity = 1;
         }
     }
 
@@ -549,38 +838,42 @@ public partial class BarWindow : FluentWindow
             : 0.12 + (0.08 * Math.Sin(time * 1.4));
         var value = 1 + (0.5 * wave * (0.35 + (0.65 * _level)));
         scale.ScaleX = scale.ScaleY = value;
+        MiniDots.Opacity = _mini ? 0.35 + (0.65 * wave) : 1;
     }
 
     /// <summary>
     /// Ciclo dei messaggi: modalità discreta (i clic passano tranne che sulla maniglia),
-    /// ridimensionamento orizzontale e riapplicazione della regione dopo ogni cambio di forma.
+    /// ridimensionamento orizzontale e riallineamento del ritaglio dopo ogni cambio di forma.
     /// </summary>
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == 0x001A) // WM_SETTINGCHANGE: trasparenza, contrasto elevato, animazioni.
         {
-            Dispatcher.BeginInvoke(() => { ApplyMaterial(); UpdatePulseTimer(); });
+            Dispatcher.BeginInvoke(() =>
+            {
+                ApplyMaterial();
+                Win32.MakeFloatingBar(this);
+                ApplyShellClip();
+                UpdatePulseTimer();
+            });
             return IntPtr.Zero;
         }
         if (msg is WmSize or WmDpiChanged)
         {
-            ApplyWindowRegion();
+            ApplyShellClip();
             return IntPtr.Zero;
-        }
-
-        if (msg == WmSizing)
-        {
-            handled = true;
-            return ResizeHorizontally(wParam.ToInt32(), lParam);
         }
 
         if (msg == WmExitSizeMove)
         {
-            _settings.BarWidth = BarGeometry.ClampWidth(Width);
-            ApplyLayout();
-            if (!_shot)
+            if (!_mini)
             {
-                _settings.Save();
+                _settings.BarLeft = Left;
+                _settings.BarTop = Top;
+                if (!_shot)
+                {
+                    _settings.Save();
+                }
             }
 
             return IntPtr.Zero;
@@ -605,39 +898,6 @@ public partial class BarWindow : FluentWindow
         return IntPtr.Zero;
     }
 
-    /// <summary>
-    /// Larghezza libera, altezza fissa: il pannello cambia solo in orizzontale.
-    /// </summary>
-    private IntPtr ResizeHorizontally(int edge, IntPtr lParam)
-    {
-        var rect = Marshal.PtrToStructure<Win32.NativeRect>(lParam);
-        var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        var min = (int)Math.Round(BarGeometry.MinWidth * dpi);
-        var max = (int)Math.Round(BarGeometry.MaxWidth * dpi);
-        if (!Win32.TryGetBarBounds(this, out var current, out var area)) return IntPtr.Zero;
-
-        var width = Math.Clamp(rect.Right - rect.Left, min, max);
-        width = Math.Min(width, area.Right - area.Left);
-
-        var draggingLeft = edge is WmszLeft or WmszTopLeft or WmszBottomLeft;
-        var left = draggingLeft ? current.Right - width : current.Left;
-        if (left < area.Left)
-        {
-            left = area.Left;
-        }
-
-        if (left + width > area.Right)
-        {
-            left = area.Right - width;
-        }
-
-        Marshal.StructureToPtr(
-            new Win32.NativeRect { Left = left, Top = current.Top, Right = left + width, Bottom = current.Bottom },
-            lParam,
-            fDeleteOld: false);
-        return new IntPtr(1);
-    }
-
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (_forceClose || !_settings.CloseToTray)
@@ -660,16 +920,40 @@ public partial class BarWindow : FluentWindow
 
     /// <summary>Descrizione delle misure reali: serve a capire subito un ritaglio sbagliato.</summary>
     internal string Describe() =>
-        $"finestra {Width:F0}x{Height:F0} (min {MinHeight:F0}/{MinWidth:F0}) · "
-        + $"pannello {Shell.ActualWidth:F0}x{Shell.ActualHeight:F0} · "
-        + $"elenco {Scroller.ActualWidth:F0}x{Scroller.ActualHeight:F0} (chiesto {Scroller.Height:F0}) · "
-        + $"righe 1–2 visibili, in memoria {_rows.Count}";
+        $"finestra {Width:F0}x{Height:F0} · pannello {Shell.ActualWidth:F0}x{Shell.ActualHeight:F0} "
+        + $"(riempie la finestra: {(ShellFillsWindow ? "sì" : "no")}) · "
+        + $"elenco {Scroller.ActualWidth:F0}x{Scroller.ActualHeight:F0} · "
+        + $"vetro {_settings.BarOpacity:P0} · in memoria {_rows.Count}";
+
+    /// <summary>
+    /// True quando il pannello di vetro riempie esattamente la finestra: se resta anche solo un
+    /// pixel di finestra scoperto, l'acrilico lo dipinge come una fascia fuori posto.
+    /// </summary>
+    internal bool ShellFillsWindow
+    {
+        get
+        {
+            if (!Win32.TryGetBarBounds(this, out var bounds, out _)) return false;
+            if (Shell.ActualWidth <= 1 || Shell.ActualHeight <= 1) return false;
+            var dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+            var width = (bounds.Right - bounds.Left) / dpi;
+            var height = (bounds.Bottom - bounds.Top) / dpi;
+            return Math.Abs(Shell.ActualWidth - width) <= 1.5
+                   && Math.Abs(Shell.ActualHeight - height) <= 1.5;
+        }
+    }
 
     /// <summary>Elemento da fotografare: il pannello, senza il margine dell'ombra della finestra.</summary>
     internal FrameworkElement ShotTarget => Shell;
 
-    /// <summary>3 = COMPLEXREGION: la finestra non è più un semplice rettangolo.</summary>
-    internal int RegionType => Win32.WindowRegionType(this);
+    internal bool HasWindowFrame => Win32.HasWindowFrame(this);
+
+    internal bool HasShellClip => Shell.Clip is not null;
+
+    /// <summary>True quando il vetro di Windows è attivo sulla barra.</summary>
+    internal bool HasAcrylic => _acrylic;
+
+    internal bool IsMini => _mini;
 
     private void OnStartStopClicked(object sender, RoutedEventArgs e) => StartStopRequested?.Invoke();
 

@@ -14,11 +14,10 @@ namespace WisperTranslator.Core.Session;
 public sealed class TranscriptionSession : IAsyncDisposable
 {
     private readonly Dictionary<int, Cue> _cues = [];
-    private readonly Dictionary<int, int> _translationVersions = [];
-    private readonly Dictionary<int, CancellationTokenSource> _pendingTranslations = [];
-    private readonly HashSet<Task> _translationTasks = [];
+    private readonly Dictionary<int, CueTranslationLane> _translationLanes = [];
     private readonly object _cueGate = new();
-    private readonly SemaphoreSlim _translationGate = new(2, 2);
+    private readonly SemaphoreSlim _fastTranslationGate;
+    private readonly SemaphoreSlim _qualityTranslationGate = new(1, 1);
     private SessionStore? _history;
     private readonly bool _ownsHistory;
     private long _historySessionId;
@@ -46,6 +45,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private int _nextCueId;
     private TranslationServer? _translationServer;
     private TranslationService? _translationService;
+    private TranslationService? _qualityTranslationService;
     private CancellationTokenSource? _cancellation;
     private Task? _pipeline;
     private bool _disposed;
@@ -57,14 +57,13 @@ public sealed class TranscriptionSession : IAsyncDisposable
         public bool SpeakerIsFixed => Speaker != Speakers.Unknown;
     }
 
-    /// <summary>Attesa prima di tradurre un parziale: evita di tradurre ogni singola parola.</summary>
-    private static readonly TimeSpan ProgressiveTranslationDelay = TimeSpan.FromMilliseconds(300);
-
     public TranscriptionSession(SessionOptions? options = null, SessionStore? history = null)
     {
         Options = options ?? new SessionOptions();
         _history = history;
         _ownsHistory = history is null;
+        var cores = Hardware.HardwareDetector.Detect().PhysicalCores;
+        _fastTranslationGate = new SemaphoreSlim(Math.Clamp(cores / 2, 2, 4));
     }
 
     public SessionOptions Options { get; }
@@ -82,6 +81,9 @@ public sealed class TranscriptionSession : IAsyncDisposable
     public string? LastError { get; private set; }
 
     public long Transcribed { get; private set; }
+
+    /// <summary>Quante rifiniture di qualità sono andate a schermo: diagnostica e test.</summary>
+    public long QualityPasses { get; private set; }
 
     /// <summary>Storico locale: viene creato automaticamente al primo avvio della sessione.</summary>
     public SessionStore? History => _history;
@@ -284,12 +286,49 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
             _translationService = new TranslationService(
                 new LocalHttpEngine(Options.TranslationPort));
+            _qualityTranslationService = StartQualityEngine(report);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LastError = exception.Message;
             report($"Traduttore non disponibile ({exception.Message}): continuo solo con la trascrizione");
         }
+    }
+
+    /// <summary>
+    /// Secondo stadio: si attiva solo se i modelli ONNX ci sono e la macchina lo regge. Su una
+    /// macchina minima la corsia rapida resta identica, senza messaggi d'errore.
+    /// </summary>
+    private TranslationService? StartQualityEngine(Action<string> report)
+    {
+        if (Options.QualityTranslation == QualityTranslationMode.Off)
+        {
+            return null;
+        }
+
+        if (!OnnxTranslationEngine.IsPairInstalled("it", "en")
+            || !OnnxTranslationEngine.IsPairInstalled("en", "it"))
+        {
+            if (Options.QualityTranslation == QualityTranslationMode.Forced)
+            {
+                report("Rifinitura di qualità non attiva: scarica i modelli Marian dalla scheda Modelli");
+            }
+
+            return null;
+        }
+
+        if (Options.QualityTranslation == QualityTranslationMode.Auto)
+        {
+            var profile = Hardware.HardwareDetector.Detect();
+            if (profile.PhysicalCores <= 4 || profile.RamMegabytes < 8192)
+            {
+                report("Rifinitura di qualità spenta: questa macchina resta sulla corsia rapida");
+                return null;
+            }
+        }
+
+        report("Rifinitura di qualità pronta (Marian ONNX)");
+        return new TranslationService(new OnnxTranslationEngine(), cacheLimit: 400);
     }
 
     private void BuildPipeline()
@@ -588,95 +627,105 @@ public sealed class TranscriptionSession : IAsyncDisposable
         }
     }
 
-    /// <summary>Accoda la traduzione annullando quella precedente della stessa battuta.</summary>
+    /// <summary>
+    /// Le due corsie della battuta. La rapida traduce il parziale che cresce senza essere mai
+    /// annullata; la qualità rifinisce a metà enunciato e alla fine. La corsia si archivia da
+    /// sola quando il finale è stato tradotto da entrambe.
+    /// </summary>
     private void ScheduleTranslation(Cue cue, bool isFinal)
     {
-        CancellationTokenSource cancellation;
+        CueTranslationLane lane;
         lock (_cueGate)
         {
             if (_disposed) return;
-            if (_pendingTranslations.TryGetValue(cue.Id, out var previous))
+            if (!_translationLanes.TryGetValue(cue.Id, out var existing))
             {
-                previous.Cancel();
+                existing = new CueTranslationLane(
+                    cue.Id,
+                    _translationService!,
+                    _qualityTranslationService,
+                    _fastTranslationGate,
+                    _qualityTranslationGate,
+                    () => (Options.SourceLanguage, Options.TargetLanguage),
+                    PublishTranslation,
+                    message => StatusChanged?.Invoke(message),
+                    _cancellation?.Token ?? CancellationToken.None);
+                existing.Finished += OnTranslationLaneFinished;
+                _translationLanes[cue.Id] = existing;
             }
 
-            cancellation = CancellationTokenSource.CreateLinkedTokenSource(_cancellation?.Token ?? CancellationToken.None);
-            _pendingTranslations[cue.Id] = cancellation;
-            var version = _translationVersions.GetValueOrDefault(cue.Id) + 1;
-            _translationVersions[cue.Id] = version;
-            var task = TranslateCueAsync(cue, isFinal, version, Options.SourceLanguage, Options.TargetLanguage, cancellation);
-            _translationTasks.Add(task);
-            _ = task.ContinueWith(completed =>
-            {
-                lock (_cueGate) { _translationTasks.Remove(completed); }
-            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            lane = existing;
         }
+
+        lane.Update(cue.Original, isFinal);
     }
 
-    private async Task TranslateCueAsync(Cue cue, bool isFinal, int version, string from, string to,
-        CancellationTokenSource cancellation)
+    private void OnTranslationLaneFinished(CueTranslationLane lane)
     {
-        var cancellationToken = cancellation.Token;
-
-        try
+        lock (_cueGate)
         {
-            if (!isFinal)
+            if (_translationLanes.TryGetValue(lane.CueId, out var current) && ReferenceEquals(current, lane))
             {
-                // Debounce: mentre l'utente parla il testo si assesta di continuo.
-                await Task.Delay(ProgressiveTranslationDelay, cancellationToken).ConfigureAwait(false);
+                _translationLanes.Remove(lane.CueId);
             }
+        }
 
-            await _translationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            TranslationResult result;
+        lane.Dispose();
+    }
+
+    /// <summary>La traduzione appena pronta aggiorna la battuta senza riordinare l'elenco.</summary>
+    private void PublishTranslation(int cueId, string translation, bool quality)
+    {
+        Cue updated;
+        lock (_cueGate)
+        {
+            if (_disposed || !_cues.TryGetValue(cueId, out var existing)) return;
+            if (existing.Translation == translation) return;
+            updated = existing with { Translation = translation };
+            _cues[cueId] = updated;
+        }
+
+        if (quality)
+        {
+            QualityPasses++;
+        }
+
+        CueUpdated?.Invoke(updated);
+        SaveHistoryCue(updated.Id);
+        WriteTranslationDiagnostic(updated, quality);
+    }
+
+    /// <summary>
+    /// Una riga JSON per traduzione pubblicata: serve a misurare sul campo quanto ci mette la
+    /// corsia rapida e quando arriva la rifinitura di qualità.
+    /// </summary>
+    private void WriteTranslationDiagnostic(Cue cue, bool quality)
+    {
+        if (_diagnosticPath is null)
+        {
+            return;
+        }
+
+        var line = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            t = DateTime.Now.ToString("HH:mm:ss.fff"),
+            utterance = cue.Id,
+            lane = quality ? "qualità" : "rapida",
+            final = cue.IsFinal,
+            chars = cue.Original.Length,
+            original = cue.Original,
+            translation = cue.Translation,
+        });
+
+        lock (_diagnosticGate)
+        {
             try
             {
-                result = await _translationService!
-                    .TranslateAsync(cue.Original, from, to, cancellationToken)
-                    .ConfigureAwait(false);
+                File.AppendAllText(_diagnosticPath, line + Environment.NewLine);
             }
-            finally
+            catch (IOException)
             {
-                _translationGate.Release();
-            }
-
-            Cue updated;
-            lock (_cueGate)
-            {
-                if (_disposed || cancellationToken.IsCancellationRequested || !Options.Translate
-                    || Options.SourceLanguage != from || Options.TargetLanguage != to) return;
-                if (_translationVersions.TryGetValue(cue.Id, out var latest) && latest != version)
-                {
-                    return;
-                }
-
-                if (!_cues.TryGetValue(cue.Id, out var existing))
-                {
-                    return;
-                }
-
-                updated = existing with { Translation = result.Text };
-                _cues[cue.Id] = updated;
-            }
-
-            CueUpdated?.Invoke(updated);
-            SaveHistoryCue(updated.Id);
-        }
-        catch (OperationCanceledException)
-        {
-            // superata da un aggiornamento più recente
-        }
-        catch (Exception exception)
-        {
-            LastError = exception.Message;
-            StatusChanged?.Invoke($"Traduzione non riuscita: {exception.Message}");
-        }
-        finally
-        {
-            lock (_cueGate)
-            {
-                if (_pendingTranslations.TryGetValue(cue.Id, out var pending) && ReferenceEquals(pending, cancellation))
-                    _pendingTranslations.Remove(cue.Id);
-                cancellation.Dispose();
+                // il log non deve mai fermare la traduzione
             }
         }
     }
@@ -736,6 +785,11 @@ public sealed class TranscriptionSession : IAsyncDisposable
         {
             _translationService.ClearCache();
         }
+
+        if (_qualityTranslationService is not null)
+        {
+            _qualityTranslationService.ClearCache();
+        }
     }
 
     public async Task StopAsync()
@@ -780,12 +834,13 @@ public sealed class TranscriptionSession : IAsyncDisposable
         Task translations;
         lock (_cueGate)
         {
-            foreach (var pending in _pendingTranslations.Values)
+            foreach (var lane in _translationLanes.Values)
             {
-                pending.Cancel();
+                lane.Dispose();
             }
 
-            translations = Task.WhenAll(_translationTasks);
+            translations = Task.WhenAll(_translationLanes.Values.Select(lane => lane.Completion));
+            _translationLanes.Clear();
         }
 
         // Lo stop può essere già tornato per timeout; la memoria dei decoder e i servizi
@@ -836,9 +891,11 @@ public sealed class TranscriptionSession : IAsyncDisposable
         });
         Safe(() => _mixer?.Dispose());
         Safe(() => _translationService?.Dispose());
+        Safe(() => _qualityTranslationService?.Dispose());
         Safe(() => _translationServer?.Dispose());
         Safe(() => _speakerTracker?.Dispose());
-        Safe(() => _translationGate.Dispose());
+        Safe(() => _fastTranslationGate.Dispose());
+        Safe(() => _qualityTranslationGate.Dispose());
         Safe(() => _cancellation?.Dispose());
 
         if (_history is not null && _historySessionId > 0)

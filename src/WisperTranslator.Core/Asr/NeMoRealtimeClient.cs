@@ -180,7 +180,7 @@ public sealed class NeMoRealtimeClient : IAsyncDisposable
                             ?? Text(document.RootElement, "transcript");
                 if (!string.IsNullOrWhiteSpace(delta))
                 {
-                    Update?.Invoke(delta.Trim(), false);
+                    Update?.Invoke(delta, false);
                 }
 
                 return;
