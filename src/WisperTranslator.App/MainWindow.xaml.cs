@@ -38,6 +38,8 @@ public partial class MainWindow : FluentWindow
     private DispatcherTimer? _levelTimer;
     private bool _starting;
     private bool _exiting;
+    private bool _shotMode;
+    private bool _shotRunning;
 
     public MainWindow()
     {
@@ -165,17 +167,24 @@ public partial class MainWindow : FluentWindow
 
     private void UpdateLevel()
     {
-        var levels = _session?.Levels() ?? [];
-        if (levels.Count == 0)
+        var peak = CurrentLevel();
+        if (peak <= 0 && _session is null)
         {
             LevelText.Text = string.Empty;
             return;
         }
 
-        var peak = levels.Where(level => level.Enabled).Select(level => level.Level).DefaultIfEmpty(0).Max();
         var bars = (int)Math.Round(Math.Clamp(peak * 12, 0, 6));
         LevelText.Text = new string('●', bars) + new string('○', 6 - bars);
     }
+
+    /// <summary>Livello audio più alto fra le sorgenti attive: alimenta la spia e l'equalizzatore.</summary>
+    private float CurrentLevel() =>
+        (_session?.Levels() ?? [])
+        .Where(level => level.Enabled)
+        .Select(level => level.Level)
+        .DefaultIfEmpty(0)
+        .Max();
 
     private void PurgeHistory()
     {
@@ -423,7 +432,8 @@ public partial class MainWindow : FluentWindow
         {
             try
             {
-                _bar = new BarWindow(_settings);
+            _bar = new BarWindow(_settings);
+            _bar.LevelProvider = () => _shotMode ? 0.62f : CurrentLevel();
             }
             catch (Exception exception)
             {
@@ -453,14 +463,21 @@ public partial class MainWindow : FluentWindow
         }
 
         _bar.Show();
+        _bar.ApplyLayout();
         RefreshBar();
-        _settings.Save();
+        if (!_shotMode)
+        {
+            _settings.Save();
+        }
     }
 
     private void HideBar()
     {
         _bar?.Hide();
-        _settings.Save();
+        if (!_shotMode)
+        {
+            _settings.Save();
+        }
     }
 
     /// <summary>Passa i dati alla barra: frasi e stato dei controlli in un colpo solo.</summary>
@@ -471,7 +488,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        var running = _session is { IsRunning: true };
+        var running = _shotRunning || _session is { IsRunning: true };
         _bar.Sync(
             _cues,
             new BarState(
@@ -682,6 +699,107 @@ public partial class MainWindow : FluentWindow
         ExitApplication();
     }
 
+    /// <summary>
+    /// Screenshot per la documentazione: dati d'esempio, corpo della capsula opaco e cattura del
+    /// solo rettangolo delle finestre. Nessun pixel dello schermo dell'utente finisce nel file.
+    /// </summary>
+    internal async Task ShotAsync(string directory)
+    {
+        _shotMode = true;
+        Directory.CreateDirectory(directory);
+        var background = System.Windows.Media.Color.FromRgb(0x1B, 0x1B, 0x22);
+
+        // Barra in ascolto, con parlanti diversi e una frase ancora provvisoria.
+        _shotRunning = true;
+        _cues.Clear();
+        foreach (var cue in BarSamples.Cues())
+        {
+            _cues.Add(cue);
+        }
+
+        ShowBar();
+        if (_bar is null)
+        {
+            SetStatus("Screenshot non riuscito: la barra non è disponibile.");
+            ExitApplication();
+            return;
+        }
+
+        _bar.EnableShotMode();
+        _bar.ApplyLayout();
+        SetStatus(string.Empty);
+        RefreshBar();
+        await Task.Delay(900);
+        ShotLog($"misure barra: {_bar.Describe()}");
+        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-ascolto.png"), background, BarRadius());
+
+        // Barra a riposo: suggerimento al centro, nessuna frase.
+        _shotRunning = false;
+        _cues.Clear();
+        SetStatus(string.Empty);
+        RefreshBar();
+        await Task.Delay(700);
+        Capture(_bar.ShotTarget, Path.Combine(directory, "barra-riposo.png"), background, BarRadius());
+
+        // Pannello esteso con le stesse frasi d'esempio.
+        foreach (var cue in BarSamples.Cues())
+        {
+            _cues.Add(cue);
+        }
+
+        RefreshBar();
+        Background = new System.Windows.Media.SolidColorBrush(background);
+        Show();
+        Width = 700;
+        Height = 520;
+        Left = SystemParameters.WorkArea.Left + 60;
+        Top = SystemParameters.WorkArea.Top + 60;
+        SetStatus("In ascolto");
+        await Task.Delay(700);
+        Capture(Content as FrameworkElement ?? this, Path.Combine(directory, "pannello.png"), background, 10);
+
+        // Schede Conversazione e Barra.
+        _settingsWindow = new SettingsWindow(_settings, () => { }, SettingsTabs.Barra) { Owner = this };
+        _settingsWindow.Show();
+        await Task.Delay(900);
+        Capture(_settingsWindow.Content as FrameworkElement ?? _settingsWindow, Path.Combine(directory, "impostazioni-barra.png"), background, 10);
+        _settingsWindow.SelectTab(SettingsTabs.Conversazione);
+        await Task.Delay(700);
+        Capture(_settingsWindow.Content as FrameworkElement ?? _settingsWindow, Path.Combine(directory, "impostazioni-conversazione.png"), background, 10);
+        _settingsWindow.Close();
+
+        await Task.Delay(300);
+        ExitApplication();
+    }
+
+    private double BarRadius() =>
+        _bar is null ? 20 : Core.Settings.BarGeometry.CornerRadius(_bar.Height);
+
+    private static void Capture(FrameworkElement element, string path, System.Windows.Media.Color background, double cornerRadius)
+    {
+        try
+        {
+            WindowShot.Capture(element, path, background, cornerRadius);
+        }
+        catch (Exception exception)
+        {
+            ShotLog($"{path}: {exception.Message}");
+        }
+    }
+
+    private static void ShotLog(string message)
+    {
+        try
+        {
+            var path = Path.Combine(AppPaths.EnsureSubdirectory("logs"), "screenshot.log");
+            File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // il log non deve far fallire gli screenshot
+        }
+    }
+
     private void OnCopyOriginalClicked(object sender, RoutedEventArgs e) => CopyCue(sender, original: true);
 
     private void OnCopyTranslationClicked(object sender, RoutedEventArgs e) => CopyCue(sender, original: false);
@@ -842,7 +960,7 @@ public partial class MainWindow : FluentWindow
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         // Con "chiudi nella barra delle applicazioni" la X nasconde soltanto.
-        if (!_exiting && _settings.CloseToTray)
+        if (!_exiting && _settings.CloseToTray && !_shotMode)
         {
             e.Cancel = true;
             Hide();
@@ -851,14 +969,18 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        _settings.WindowLeft = Left;
-        _settings.WindowTop = Top;
-        _settings.WindowWidth = Width;
-        _settings.WindowHeight = Height;
-        _settings.Topmost = Topmost;
-        _settings.BarLeft = _bar?.Left ?? _settings.BarLeft;
-        _settings.BarTop = _bar?.Top ?? _settings.BarTop;
-        _settings.Save();
+        // In modalità screenshot le preferenze non si toccano: le finestre sono spostate a mano.
+        if (!_shotMode)
+        {
+            _settings.WindowLeft = Left;
+            _settings.WindowTop = Top;
+            _settings.WindowWidth = Width;
+            _settings.WindowHeight = Height;
+            _settings.Topmost = Topmost;
+            _settings.BarLeft = _bar?.Left ?? _settings.BarLeft;
+            _settings.BarTop = _bar?.Top ?? _settings.BarTop;
+            _settings.Save();
+        }
 
         _bar?.ForceClose();
 

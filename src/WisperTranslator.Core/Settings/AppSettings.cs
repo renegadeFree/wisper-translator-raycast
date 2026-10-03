@@ -100,6 +100,9 @@ public sealed class AppSettings
     /// <summary>Frasi visibili nella barra (1–3): le altre restano sotto, raggiungibili con la rotellina.</summary>
     public int BarRows { get; set; } = 2;
 
+    /// <summary>Larghezza della capsula in pixel: una frase lunga deve starci senza essere tagliata.</summary>
+    public double BarWidth { get; set; } = BarGeometry.DefaultWidth;
+
     /// <summary>Quante frasi tenere in memoria nella barra (3–8).</summary>
     public int BarBuffer { get; set; } = 5;
 

@@ -1093,6 +1093,47 @@ acrilica», «poi fai push e release».
 0,1–0,3 s per frase definitiva; con voci sovrapposte o timbri simili le etichette possono scambiarsi;
 il diarizzatore riconosce al massimo 8 parlanti.
 
+---
+
+## 15. Lavorazione v2.1 — barra "capsule" stile Apple e screenshot senza desktop (F27–F28)
+
+Richiesta dell'utente (2026-10-03): «ti do questi 3 modelli per la grafica della barra, ma la vorrei
+più larga così che possa contenere una frase lunga, con design e animazioni Apple style», «gli
+screen nel readme devono essere solo del programma senza lo schermo del pc o altri elementi privati».
+
+### F27 — Capsula, larghezza e animazioni (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F27.1 | Capsula completamente arrotondata (`raggio = altezza/2`), velo semitrasparente 0.85 sull'acrilico, bordo chiaro da 1 px e luce in alto | ✅ |
+| F27.2 | Larghezza **1000 px** di default, limiti 480–1600: slider nella scheda Barra e **bordi laterali trascinabili** (altezza bloccata, deve seguire le righe) | ✅ |
+| F27.3 | Ogni frase va a capo **fino a due righe**: non viene più troncata con i puntini; 2 frasi visibili, 5 in memoria con la rotellina | ✅ |
+| F27.4 | **Equalizzatore a 5 barrette** alimentato dal livello audio reale, con respiro lento a riposo e fase diversa per barretta | ✅ |
+| F27.5 | **Pulsante primario corallo sempre visibile** (triangolo a riposo, quadrato durante l'ascolto) e altri comandi come **pulsanti circolari incassati** che compaiono al passaggio del mouse | ✅ |
+| F27.6 | **Badge colorato del parlante** prima del testo, testo provvisorio e correzioni in **corallo** (anche nel pannello) | ✅ |
+| F27.7 | Animazioni con effetto molla: comparsa della barra, ingresso della frase, lampo sulla frase consolidata, hover/pressione dei pulsanti; tutto disattivabile con "Riduzioni animazioni" | ✅ |
+| F27.8 | Difetti trovati e risolti: `Border.Triggers` accetta solo `EventTrigger` (le righe fallivano a ogni aggiornamento) e `FluentWindow` impone `MinHeight=320` (la barra restava alta 320 px) | ✅ |
+
+### F28 — Screenshot del solo programma, documentazione e release (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F28.1 | Comando **`--shot=<cartella>`**: dati d'esempio (tre parlanti, una frase provvisoria), corpo della capsula opaco, cattura delle sole finestre dell'app | ✅ |
+| F28.2 | La cattura **disegna l'elemento WPF** (`RenderTargetBitmap`) invece di copiare lo schermo: nessun pixel del desktop per costruzione, immagini a 2x | ✅ |
+| F28.3 | Immagini prodotte: `barra-ascolto.png`, `barra-riposo.png`, `pannello.png`, `impostazioni-barra.png`, `impostazioni-conversazione.png` | ✅ |
+| F28.4 | Rimossi dal repository i due screenshot a schermo intero (`v2-barra-parlanti.png`, `v2-impostazioni-barra.png`) e il vecchio `widget.png`; README aggiornato con la nota "immagini generate su dati d'esempio" | ✅ |
+| F28.5 | Test: **83 verdi** (78 + 5 nuovi su misure della barra e dati d'esempio) | ✅ |
+| F28.6 | Installer **2.1.0**, installazione silenziosa, push, tag e release con installer e SHA-256 | ✅ |
+
+**Decisioni della v2.1:**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-30 | Capsula con raggio = metà altezza, **nessuna ombra disegnata a mano** | Un'ombra nostra richiederebbe una finestra trasparente, che spegnerebbe l'acrilico: la profondità arriva da bordo, velo e luce interna |
+| D-31 | Larghezza ridimensionabile, **altezza bloccata** | L'altezza dipende da quante frasi si vogliono vedere: lasciarla libera romperebbe il calcolo delle righe |
+| D-32 | Screenshot **renderizzati** invece di copiati dallo schermo | È l'unico modo per garantire per costruzione che non finisca nell'immagine niente di privato; in più sono nitidi a 2x |
+| D-33 | Corallo `#FF7A59` per stop, testo provvisorio e correzioni | È il colore dei riferimenti forniti dall'utente e distingue a colpo d'occhio ciò che è ancora in movimento |
+
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.
 - **Enunciato**: porzione di audio compresa tra due silenzi, inviata all'ASR.

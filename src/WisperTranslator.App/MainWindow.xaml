@@ -186,7 +186,8 @@
                                 <TextBlock Style="{StaticResource CueOriginalText}"
                                            FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource Scale}, ConverterParameter=0.8}"
                                            FontStyle="Italic"
-                                           Opacity="0.6"
+                                           Foreground="#FF7A59"
+                                           Opacity="0.85"
                                            Text="{Binding ProvisionalTail}"
                                            Visibility="{Binding HasProvisional, Converter={StaticResource BoolToVisibility}}" />
                                 <TextBlock Style="{StaticResource CueTranslationText}"

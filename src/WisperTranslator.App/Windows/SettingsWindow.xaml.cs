@@ -163,6 +163,7 @@ public partial class SettingsWindow : FluentWindow
         BarAnimationsCheck.IsChecked = _settings.BarAnimations;
         BarDiscreetCheck.IsChecked = _settings.BarDiscreet;
         BarRowsRow.Value = _settings.BarRows;
+        BarWidthRow.Value = Core.Settings.BarGeometry.ClampWidth(_settings.BarWidth);
         BarBufferRow.Value = _settings.BarBuffer;
 
         BarTextBox.ItemsSource = new[] { "Originale e traduzione", "Solo originale", "Solo traduzione" };
@@ -181,6 +182,7 @@ public partial class SettingsWindow : FluentWindow
         _settings.BarAnimations = BarAnimationsCheck.IsChecked == true;
         _settings.BarDiscreet = BarDiscreetCheck.IsChecked == true;
         _settings.BarRows = (int)Math.Round(BarRowsRow.Value);
+        _settings.BarWidth = Core.Settings.BarGeometry.ClampWidth(BarWidthRow.Value);
         _settings.BarBuffer = Math.Max((int)Math.Round(BarBufferRow.Value), _settings.BarRows);
         _settings.BarText = (BarTextMode)Math.Clamp(BarTextBox.SelectedIndex, 0, 2);
 
@@ -191,7 +193,8 @@ public partial class SettingsWindow : FluentWindow
     private void RefreshBarPreview()
     {
         BarPreviewText.Text =
-            $"La barra mostra {_settings.BarRows} frasi per volta su {_settings.BarBuffer} in memoria: "
+            $"La barra è larga {_settings.BarWidth:F0} px e mostra {_settings.BarRows} frasi da due righe "
+            + $"per volta, su {_settings.BarBuffer} in memoria: "
             + $"le altre {Math.Max(0, _settings.BarBuffer - _settings.BarRows)} restano sotto, raggiungibili con la rotellina."
             + (_settings.BarDiscreet ? " Modalità discreta attiva." : string.Empty);
     }

@@ -1,0 +1,55 @@
+using WisperTranslator.Core.Session;
+using WisperTranslator.Core.Settings;
+
+namespace WisperTranslator.Tests;
+
+/// <summary>Misure della barra e contenuto d'esempio per gli screenshot.</summary>
+public class BarGeometryTests
+{
+    [Fact]
+    public void LaLarghezzaRestaNeiLimiti()
+    {
+        Assert.Equal(BarGeometry.MinWidth, BarGeometry.ClampWidth(100));
+        Assert.Equal(BarGeometry.MaxWidth, BarGeometry.ClampWidth(9999));
+        Assert.Equal(BarGeometry.DefaultWidth, BarGeometry.ClampWidth(double.NaN));
+        Assert.Equal(900, BarGeometry.ClampWidth(900));
+    }
+
+    [Fact]
+    public void IlRaggioDellaCapsulaEMetaAltezza()
+    {
+        Assert.Equal(105, BarGeometry.CornerRadius(BarGeometry.WindowHeight(2)));
+        // Sotto una certa altezza non si scende: resterebbe un rettangolo spigoloso.
+        Assert.Equal(8, BarGeometry.CornerRadius(4));
+    }
+
+    [Fact]
+    public void AltezzaELarghezzaSeguonoLeImpostazioni()
+    {
+        Assert.Equal(78, BarGeometry.ViewportHeight(1));
+        Assert.Equal(156, BarGeometry.ViewportHeight(2));
+        // Oltre tre righe non si va: la barra coprirebbe lo schermo.
+        Assert.Equal(234, BarGeometry.ViewportHeight(9));
+        Assert.Equal(210, BarGeometry.WindowHeight(2));
+    }
+
+    [Fact]
+    public void LaLarghezzaPredefinitaE1000()
+    {
+        Assert.Equal(1000, new AppSettings().BarWidth);
+        Assert.Equal(1000, BarGeometry.ClampWidth(new AppSettings().BarWidth));
+    }
+
+    [Fact]
+    public void IContenutiDesempioHannoTreParlantiEUnaFraseProvvisoria()
+    {
+        var cues = BarSamples.Cues();
+
+        Assert.Equal(3, cues.Count);
+        Assert.Equal(3, cues.Select(cue => cue.Speaker).Distinct().Count());
+        Assert.All(cues, cue => Assert.True(cue.HasSpeaker));
+        Assert.Contains(cues, cue => !cue.IsFinal && cue.ProvisionalTail.Length > 0);
+        Assert.Contains(cues, cue => cue.Speaker == Speakers.You);
+        Assert.Equal(cues.Count, cues.Select(cue => cue.Id).Distinct().Count());
+    }
+}

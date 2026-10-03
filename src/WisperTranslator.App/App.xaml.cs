@@ -60,6 +60,20 @@ public partial class App : Application
             window.ShowOverlay();
         }
 
+        // Screenshot per la documentazione: solo finestre dell'app, su sfondo neutro.
+        // --shot=<cartella> oppure --shot (exports\screenshots).
+        var shot = e.Args.FirstOrDefault(arg => arg.StartsWith("--shot", StringComparison.OrdinalIgnoreCase));
+        if (shot is not null)
+        {
+            var directory = shot.Contains('=', StringComparison.Ordinal)
+                ? shot[(shot.IndexOf('=') + 1)..]
+                : ArgumentValue(e.Args, "--shot");
+            directory = string.IsNullOrWhiteSpace(directory)
+                ? AppPaths.EnsureSubdirectory(Path.Combine("exports", "screenshots"))
+                : directory;
+            _ = SafeAsync(() => window.ShotAsync(directory));
+        }
+
         // Collegamento "Impostazioni e sessioni" creato dall'installer.
         if (e.Args.Contains("--settings", StringComparer.OrdinalIgnoreCase)
             || e.Args.Any(arg => arg.StartsWith("--settings=", StringComparison.OrdinalIgnoreCase)))

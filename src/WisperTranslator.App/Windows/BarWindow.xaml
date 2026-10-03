@@ -3,11 +3,12 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="Wisper Translator"
-                 Width="560"
-                 Height="170"
-                 MinWidth="380"
+                 Width="1000"
+                 Height="210"
+                 MinWidth="480"
+                 MaxWidth="1600"
                  WindowStyle="None"
-                 ResizeMode="NoResize"
+                 ResizeMode="CanResize"
                  ShowInTaskbar="False"
                  ShowActivated="False"
                  WindowStartupLocation="Manual"
@@ -15,50 +16,212 @@
                  WindowCornerPreference="Round"
                  ExtendsContentIntoTitleBar="True"
                  Background="Transparent">
+    <Window.Resources>
+        <!-- Pulsanti rotondi incassati: compaiono al passaggio del mouse, come nei riferimenti. -->
+        <Style x:Key="CircleButton" TargetType="Button">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="3,0,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Circle"
+                                CornerRadius="16"
+                                Background="#1CFFFFFF"
+                                BorderThickness="1"
+                                BorderBrush="#1AFFFFFF"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="CircleScale" />
+                            </Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CircleScale"
+                                                             Storyboard.TargetProperty="ScaleX" To="1.1"
+                                                             Duration="0:0:0.14" />
+                                            <DoubleAnimation Storyboard.TargetName="CircleScale"
+                                                             Storyboard.TargetProperty="ScaleY" To="1.1"
+                                                             Duration="0:0:0.14" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CircleScale"
+                                                             Storyboard.TargetProperty="ScaleX" To="1"
+                                                             Duration="0:0:0.18" />
+                                            <DoubleAnimation Storyboard.TargetName="CircleScale"
+                                                             Storyboard.TargetProperty="ScaleY" To="1"
+                                                             Duration="0:0:0.18" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                                <Setter TargetName="Circle" Property="Background" Value="#33FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CircleScale"
+                                                             Storyboard.TargetProperty="ScaleX" To="0.92"
+                                                             Duration="0:0:0.08" />
+                                            <DoubleAnimation Storyboard.TargetName="CircleScale"
+                                                             Storyboard.TargetProperty="ScaleY" To="0.92"
+                                                             Duration="0:0:0.08" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Pulsante principale: sempre visibile, diventa corallo quando sta ascoltando. -->
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Circle"
+                                CornerRadius="19"
+                                Background="#FF7A59"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="PrimaryScale" />
+                            </Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PrimaryScale"
+                                                             Storyboard.TargetProperty="ScaleX" To="1.08"
+                                                             Duration="0:0:0.16">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <BackEase EasingMode="EaseOut" Amplitude="0.4" />
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <DoubleAnimation Storyboard.TargetName="PrimaryScale"
+                                                             Storyboard.TargetProperty="ScaleY" To="1.08"
+                                                             Duration="0:0:0.16">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <BackEase EasingMode="EaseOut" Amplitude="0.4" />
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PrimaryScale"
+                                                             Storyboard.TargetProperty="ScaleX" To="1"
+                                                             Duration="0:0:0.18" />
+                                            <DoubleAnimation Storyboard.TargetName="PrimaryScale"
+                                                             Storyboard.TargetProperty="ScaleY" To="1"
+                                                             Duration="0:0:0.18" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PrimaryScale"
+                                                             Storyboard.TargetProperty="ScaleX" To="0.92"
+                                                             Duration="0:0:0.08" />
+                                            <DoubleAnimation Storyboard.TargetName="PrimaryScale"
+                                                             Storyboard.TargetProperty="ScaleY" To="0.92"
+                                                             Duration="0:0:0.08" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Border x:Name="Shell"
-            CornerRadius="14"
+            CornerRadius="105"
             BorderThickness="1"
             Background="Transparent"
-            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            BorderBrush="#26FFFFFF"
             MouseLeftButtonDown="OnShellDrag">
-        <Grid Margin="0">
+        <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="44" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Velo semitrasparente: lascia passare l'acrilico di Windows mantenendo i colori del tema. -->
-            <Rectangle Grid.RowSpan="2" RadiusX="13" RadiusY="13"
-                       Fill="{DynamicResource ApplicationBackgroundBrush}" Opacity="0.78" />
+            <!-- Velo semitrasparente sull'acrilico, più una luce in alto: effetto vetro. -->
+            <Rectangle x:Name="Veil" Grid.RowSpan="2" RadiusX="104" RadiusY="104"
+                       Fill="{DynamicResource ApplicationBackgroundBrush}" Opacity="0.85" />
+            <Rectangle x:Name="Glass" Grid.RowSpan="2" RadiusX="104" RadiusY="104" IsHitTestVisible="False">
+                <Rectangle.Fill>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#16FFFFFF" Offset="0" />
+                        <GradientStop Color="#00FFFFFF" Offset="0.6" />
+                    </LinearGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
 
-            <!-- Maniglia: si trascina da qui (e da tutta la superficie). -->
-            <Grid x:Name="HandleRow" Grid.Row="0" Height="42" Background="Transparent">
+            <!-- Riga comandi: equalizzatore, stato, controlli e pulsante principale. -->
+            <Grid x:Name="HandleRow" Grid.Row="0" Margin="58,0,58,0" Background="Transparent">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
-                    <Ellipse x:Name="LiveDot" Width="9" Height="9" Fill="#8A8A8E" VerticalAlignment="Center">
-                        <Ellipse.RenderTransform>
-                            <ScaleTransform x:Name="LiveDotScale" CenterX="4.5" CenterY="4.5" />
-                        </Ellipse.RenderTransform>
-                    </Ellipse>
-                    <TextBlock x:Name="TitleText" Text="Wisper" Margin="8,0,0,0" FontWeight="SemiBold"
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel x:Name="Equalizer" Orientation="Horizontal" VerticalAlignment="Center"
+                                Margin="0,0,10,0">
+                        <Rectangle x:Name="Eq0" Width="3" Height="6" RadiusX="1.5" RadiusY="1.5"
+                                   Fill="#E6FFFFFF" VerticalAlignment="Center" />
+                        <Rectangle x:Name="Eq1" Width="3" Height="6" RadiusX="1.5" RadiusY="1.5"
+                                   Fill="#E6FFFFFF" VerticalAlignment="Center" Margin="3,0,0,0" />
+                        <Rectangle x:Name="Eq2" Width="3" Height="6" RadiusX="1.5" RadiusY="1.5"
+                                   Fill="#E6FFFFFF" VerticalAlignment="Center" Margin="3,0,0,0" />
+                        <Rectangle x:Name="Eq3" Width="3" Height="6" RadiusX="1.5" RadiusY="1.5"
+                                   Fill="#E6FFFFFF" VerticalAlignment="Center" Margin="3,0,0,0" />
+                        <Rectangle x:Name="Eq4" Width="3" Height="6" RadiusX="1.5" RadiusY="1.5"
+                                   Fill="#E6FFFFFF" VerticalAlignment="Center" Margin="3,0,0,0" />
+                    </StackPanel>
+
+                    <TextBlock x:Name="TitleText" Text="Wisper" FontWeight="SemiBold"
                                VerticalAlignment="Center" />
                     <TextBlock x:Name="HandleStatus" Margin="8,0,0,0" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" MaxWidth="200"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11" />
+                               TextTrimming="CharacterEllipsis" MaxWidth="320" FontSize="11"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
                 <TextBlock Grid.Column="1" x:Name="SpeakerHintText" HorizontalAlignment="Right"
                            Margin="0,0,10,0" VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
-                <!-- Controlli: compaiono al passaggio del mouse. -->
                 <StackPanel x:Name="ControlsPanel" Grid.Column="2" Orientation="Horizontal"
-                            VerticalAlignment="Center" Margin="0,0,8,0" Opacity="0">
+                            VerticalAlignment="Center" Opacity="0" RenderTransformOrigin="1,0.5">
+                    <StackPanel.RenderTransform>
+                        <ScaleTransform x:Name="ControlsScale" />
+                    </StackPanel.RenderTransform>
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
                             <Style.Triggers>
@@ -76,7 +239,7 @@
                                         <BeginStoryboard>
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0"
-                                                                 Duration="0:0:0.22" />
+                                                                 Duration="0:0:0.2" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </DataTrigger.ExitActions>
@@ -85,64 +248,104 @@
                         </Style>
                     </StackPanel.Style>
 
-                    <ui:Button x:Name="PlayButton" Icon="{ui:SymbolIcon Play24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnStartStopClicked" ToolTip="Avvia o ferma" />
-                    <ui:Button x:Name="SystemButton" Icon="{ui:SymbolIcon Speaker024}" Appearance="Transparent"
-                               Padding="7,4" Click="OnSystemClicked" ToolTip="Audio di sistema" />
-                    <ui:Button x:Name="MicrophoneButton" Icon="{ui:SymbolIcon Mic24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnMicrophoneClicked" ToolTip="Microfono" />
-                    <ui:Button Icon="{ui:SymbolIcon ArrowSwap24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnSwapClicked" ToolTip="Inverti la direzione" />
-                    <ui:Button x:Name="TextModeButton" Icon="{ui:SymbolIcon TextBulletList24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnTextModeClicked" ToolTip="Testo mostrato" />
-                    <ui:Button x:Name="ConversationButton" Icon="{ui:SymbolIcon People24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnConversationClicked"
-                               ToolTip="Modalità conversazione: nomi dei parlanti" />
-                    <ui:Button x:Name="TranslateButton" Icon="{ui:SymbolIcon Translate24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnTranslateClicked" ToolTip="Traduci o solo trascrivi" />
-                    <ui:Button x:Name="DiscreetButton" Icon="{ui:SymbolIcon EyeOff24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnDiscreetClicked"
-                               ToolTip="Modalità discreta: lascia passare i clic" />
-                    <ui:Button Icon="{ui:SymbolIcon Subtitles24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnOverlayClicked" ToolTip="Sottotitoli a schermo intero" />
-                    <ui:Button Icon="{ui:SymbolIcon PanelRight24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnPanelClicked" ToolTip="Apri il pannello completo" />
-                    <ui:Button Icon="{ui:SymbolIcon Settings24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnSettingsClicked" ToolTip="Impostazioni" />
-                    <ui:Button Icon="{ui:SymbolIcon Dismiss24}" Appearance="Transparent"
-                               Padding="7,4" Click="OnHideClicked" ToolTip="Chiudi nella barra delle applicazioni" />
+                    <Button x:Name="SystemButton" Style="{StaticResource CircleButton}" Click="OnSystemClicked">
+                        <ui:SymbolIcon Symbol="Speaker024" FontSize="14" />
+                    </Button>
+                    <Button x:Name="MicrophoneButton" Style="{StaticResource CircleButton}" Click="OnMicrophoneClicked">
+                        <ui:SymbolIcon Symbol="Mic24" FontSize="14" />
+                    </Button>
+                    <Button Style="{StaticResource CircleButton}" Click="OnSwapClicked">
+                        <ui:SymbolIcon Symbol="ArrowSwap24" FontSize="14" />
+                    </Button>
+                    <Button x:Name="TextModeButton" Style="{StaticResource CircleButton}" Click="OnTextModeClicked">
+                        <ui:SymbolIcon Symbol="TextBulletList24" FontSize="14" />
+                    </Button>
+                    <Button x:Name="ConversationButton" Style="{StaticResource CircleButton}" Click="OnConversationClicked">
+                        <ui:SymbolIcon Symbol="People24" FontSize="14" />
+                    </Button>
+                    <Button x:Name="TranslateButton" Style="{StaticResource CircleButton}" Click="OnTranslateClicked">
+                        <ui:SymbolIcon Symbol="Translate24" FontSize="14" />
+                    </Button>
+                    <Button x:Name="DiscreetButton" Style="{StaticResource CircleButton}" Click="OnDiscreetClicked">
+                        <ui:SymbolIcon Symbol="EyeOff24" FontSize="14" />
+                    </Button>
+                    <Button Style="{StaticResource CircleButton}" Click="OnOverlayClicked">
+                        <ui:SymbolIcon Symbol="Subtitles24" FontSize="14" />
+                    </Button>
+                    <Button Style="{StaticResource CircleButton}" Click="OnPanelClicked">
+                        <ui:SymbolIcon Symbol="PanelRight24" FontSize="14" />
+                    </Button>
+                    <Button Style="{StaticResource CircleButton}" Click="OnSettingsClicked">
+                        <ui:SymbolIcon Symbol="Settings24" FontSize="14" />
+                    </Button>
+                    <Button Style="{StaticResource CircleButton}" Click="OnHideClicked">
+                        <ui:SymbolIcon Symbol="Dismiss24" FontSize="14" />
+                    </Button>
                 </StackPanel>
+
+                <Button x:Name="PrimaryButton" Grid.Column="3" Style="{StaticResource PrimaryButton}"
+                        Margin="10,0,0,0" Click="OnStartStopClicked" ToolTip="Avvia o ferma">
+                    <ui:SymbolIcon x:Name="PrimaryIcon" Symbol="Play24" FontSize="16" />
+                </Button>
             </Grid>
 
-            <ScrollViewer x:Name="Scroller" Grid.Row="1" Margin="6,0,6,6"
+            <ScrollViewer x:Name="Scroller" Grid.Row="1" Margin="14,0,14,10"
                           VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"
                           PanningMode="VerticalOnly">
                 <ItemsControl x:Name="CueList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border x:Name="Row" Height="50" CornerRadius="10" Margin="0,0,0,4" Padding="10,5"
-                                    Background="#14FFFFFF">
+                            <Border x:Name="Row" Height="74" CornerRadius="16" Margin="0,0,0,4" Padding="14,9"
+                                    Background="{Binding RowBackground}" MouseLeftButtonDown="OnShellDrag">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Opacity" Value="1" />
+                                        <Style.Triggers>
+                                            <!-- La frase appena consolidata entra con un lampo corallo. -->
+                                            <DataTrigger Binding="{Binding Flash}" Value="True">
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                             From="0.25" To="1"
+                                                                             Duration="0:0:0.4">
+                                                                <DoubleAnimation.EasingFunction>
+                                                                    <CubicEase EasingMode="EaseOut" />
+                                                                </DoubleAnimation.EasingFunction>
+                                                            </DoubleAnimation>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
 
-                                    <Ellipse Width="8" Height="8" VerticalAlignment="Top" Margin="0,6,8,0"
-                                             Fill="{Binding Color}"
-                                             Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}" />
+                                    <Border VerticalAlignment="Top" Margin="0,1,10,0" CornerRadius="9"
+                                            Padding="8,2" Height="19"
+                                            Background="{Binding BadgeBackground}"
+                                            Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{Binding SpeakerLabel}" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{Binding BadgeForeground}" />
+                                    </Border>
 
                                     <StackPanel Grid.Column="1">
-                                        <TextBlock FontSize="13" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                        <TextBlock Text="{Binding Original}" FontSize="12" Height="18"
+                                                   TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                                   Visibility="{Binding HasOriginal, Converter={StaticResource BoolToVisibility}}">
-                                            <Run Text="{Binding SpeakerLabel, Mode=OneWay}" FontSize="11" FontWeight="SemiBold"
-                                                 Foreground="{Binding Color}" />
-                                            <Run Text="{Binding Original, Mode=OneWay}" />
+                                                   Visibility="{Binding HasOriginal, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock FontSize="15.5" FontWeight="SemiBold" Height="40" Margin="0,2,0,0"
+                                                   TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                                   Visibility="{Binding HasMain, Converter={StaticResource BoolToVisibility}}">
+                                            <Run Text="{Binding Main, Mode=OneWay}" />
+                                            <Run Text="{Binding Trail, Mode=OneWay}" />
                                         </TextBlock>
-                                        <TextBlock Text="{Binding Translation}" FontSize="15" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
-                                                   Visibility="{Binding HasTranslation, Converter={StaticResource BoolToVisibility}}" />
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -150,6 +353,10 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+
+            <TextBlock x:Name="IdleHint" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Text="Premi Avvia per i sottotitoli" FontSize="14" Opacity="0"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </Grid>
     </Border>
 </ui:FluentWindow>

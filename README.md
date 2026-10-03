@@ -3,11 +3,29 @@
 Trascrizione e traduzione **in tempo reale** e **in locale** dell'audio del PC e del microfono, con
 sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 
-![Barra fluttuante con i parlanti](docs/screenshots/v2-barra-parlanti.png)
+![Barra fluttuante con i parlanti](docs/screenshots/barra-ascolto.png)
 
-![Overlay a schermo intero](docs/screenshots/overlay.png)
+![Barra a riposo](docs/screenshots/barra-riposo.png)
 
-![Scheda Barra delle impostazioni](docs/screenshots/v2-impostazioni-barra.png)
+![Pannello esteso](docs/screenshots/pannello.png)
+
+![Scheda Barra delle impostazioni](docs/screenshots/impostazioni-barra.png)
+
+> Le immagini sono generate dal programma stesso (`WisperTranslator.App.exe --shot`) su frasi
+> d'esempio: non contengono lo schermo del PC né dati di nessuno.
+
+## Novità della versione 2.1
+
+- **Barra ridisegnata in stile Apple**: capsula completamente arrotondata, **equalizzatore animato**
+  che segue l'audio reale, **pulsante di stop corallo** sempre a portata, pulsanti circolari incassati
+  che compaiono al passaggio del mouse, animazioni con effetto molla.
+- **Più larga, per frasi intere**: 1000 px di default (480–1600 dallo slider o trascinando i bordi),
+  ogni frase va a capo **fino a due righe** e non viene più troncata. Restano 2 frasi visibili su 5
+  in memoria, con la rotellina per le altre.
+- **Parlante come badge colorato** prima del testo (come nei riferimenti), testo provvisorio e
+  correzioni **evidenziati in corallo** invece che in grigio.
+- **Screenshot senza desktop**: il comando `--shot` disegna solo le finestre dell'app su uno sfondo
+  neutro, quindi nelle immagini del README non finisce niente dello schermo.
 
 ## Novità della versione 2.0
 
@@ -103,9 +121,11 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 | `Ctrl+Alt+O` | overlay on/off |
 
 Nella **barra fluttuante** gli stessi comandi sono sui pulsanti che compaiono passando il mouse:
-avvia/ferma, sistema, microfono, inverti direzione, testo mostrato, conversazione, traduci,
-modalità discreta, overlay, apri il pannello, impostazioni, chiudi nella barra delle applicazioni.
-Il testo si trascina da qualsiasi punto della barra.
+il pulsante **corallo a destra** avvia e ferma ed è sempre visibile; gli altri (sistema, microfono,
+inverti direzione, testo mostrato, conversazione, traduci, modalità discreta, overlay, apri il
+pannello, impostazioni, chiudi nella barra delle applicazioni) compaiono alla sua sinistra. Il testo
+si trascina da qualsiasi punto della barra, che si allarga e si restringe **trascinando i bordi
+laterali**.
 
 ### Dove stanno i dati
 
@@ -135,6 +155,8 @@ l'eventuale motore cloud opzionale usano la rete, e il motore cloud è spento di
 | Due righe identiche in conversazione | microfono e audio di sistema hanno sentito la stessa voce | usa le cuffie, oppure spegni **Microfono** |
 | Nessun nome accanto alle battute | diarizzatore non installato o motore definitivo non NeMo | `Impostazioni → Conversazione → Scarica il diarizzatore` |
 | La barra non compare | l'hai chiusa con la X (resta attiva) | `Visuale → Barra fluttuante`, oppure dall'icona nella barra delle applicazioni |
+| La barra è troppo stretta o troppo larga | la larghezza predefinita è 1000 px | trascina i bordi laterali oppure usa `Impostazioni → Barra → Larghezza barra` |
+| Una frase lunga viene tagliata | la riga mostra al massimo due righe | allarga la barra: il testo va a capo finché ci sta |
 | Download interrotto | rete instabile | rilanciare: riprende da dove era rimasto |
 | Modello "hash diverso" | file scaricato male | `Impostazioni → Modelli → Elimina`, poi `Scarica` |
 
@@ -150,6 +172,13 @@ dotnet run --project src/WisperTranslator.Cli -- translate --bench
 dotnet run --project src/WisperTranslator.Cli -- models list
 dotnet run --project src/WisperTranslator.Cli -- history list
 dotnet run --project src/WisperTranslator.Cli -- diarize clip.wav --lang en
+```
+
+Per rigenerare le immagini del README (solo finestre dell'app, su sfondo neutro, con frasi
+d'esempio):
+
+```powershell
+dotnet run --project src/WisperTranslator.App -- --shot=docs/screenshots
 ```
 
 Per creare l'installer:
