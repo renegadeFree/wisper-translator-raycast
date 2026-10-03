@@ -25,7 +25,9 @@ public sealed class NeMoSpeechEngine : IAsrEngine
         _server = server;
         _ownsServer = ownsServer;
         _diarize = diarize;
-        Name = name ?? (diarize ? "NeMo Nemotron 3.5 + parlanti" : "NeMo Nemotron 3.5");
+        Name = name ?? (diarize && server.DiarModelPath is not null
+            ? $"NeMo Nemotron 3.5 + {NeMoModels.DiarizerEntry(server.DiarModelPath).DisplayName}"
+            : diarize ? "NeMo Nemotron 3.5 + parlanti" : "NeMo Nemotron 3.5");
     }
 
     public string Name { get; }

@@ -196,6 +196,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         if (NeMoModels.DiarizerPathIfInstalled(Options.DiarizerModelId) is { } installed)
         {
+            var entry = NeMoModels.DiarizerEntry(Options.DiarizerModelId);
+            report($"Diarizzazione attiva: {entry.DisplayName}");
             return installed;
         }
 
@@ -286,7 +288,16 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
             _translationService = new TranslationService(
                 new LocalHttpEngine(Options.TranslationPort));
-            _qualityTranslationService = StartQualityEngine(report);
+
+            if (Options.TranslationPipeline == TranslationPipelineMode.FastOnly)
+            {
+                report("Traduzione veloce attiva: solo Bergamot istantaneo");
+                _qualityTranslationService = null;
+            }
+            else
+            {
+                _qualityTranslationService = StartQualityEngine(report);
+            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -427,6 +438,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         try
         {
+            _speakerTracker.TriggerNow();
             var cueId = ResolveCueId(lane.Index, utterance);
 
             var token = _cancellation?.Token ?? CancellationToken.None;
@@ -649,7 +661,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
                     () => (Options.SourceLanguage, Options.TargetLanguage),
                     PublishTranslation,
                     message => StatusChanged?.Invoke(message),
-                    _cancellation?.Token ?? CancellationToken.None);
+                    _cancellation?.Token ?? CancellationToken.None,
+                    mode: Options.TranslationPipeline);
                 existing.Finished += OnTranslationLaneFinished;
                 _translationLanes[cue.Id] = existing;
             }

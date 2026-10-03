@@ -81,19 +81,10 @@
                             </StackPanel>
                         </Border>
 
-                        <TextBlock Text="Profilo prestazioni" Margin="0,0,0,4" />
+                        <TextBlock Text="Profilo prestazioni consigliato" Margin="0,0,0,4" />
                         <ComboBox x:Name="PresetBox" DisplayMemberPath="Label" SelectionChanged="OnPresetChanged" />
                         <TextBlock x:Name="PresetHint" Margin="0,6,0,0" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-
-                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <TextBlock Text="Motore istantaneo" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <ComboBox x:Name="LiveBackendBox" Width="150" DisplayMemberPath="Label"
-                                      SelectionChanged="OnPresetChanged" />
-                            <TextBlock Text="Motore definitivo" VerticalAlignment="Center" Margin="14,0,6,0" />
-                            <ComboBox x:Name="FinalBackendBox" Width="150" DisplayMemberPath="Label"
-                                      SelectionChanged="OnPresetChanged" />
-                        </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                             <Button Content="Applica profilo" Padding="10,4" Click="OnApplyProfileClicked" />
@@ -106,10 +97,66 @@
                         <TextBlock x:Name="ProfileStatusText" Margin="0,6,0,0" TextWrapping="Wrap" />
 
                         <Separator Margin="0,16,0,12" />
-                        <TextBlock Text="Traduzione" Margin="0,0,0,4" />
+                        <TextBlock Text="Motori di trascrizione per corsia" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                        <Border Padding="10" CornerRadius="6" Margin="0,0,0,8"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <TextBlock Text="Testo immediato (streaming mentre parli)" FontWeight="Medium" Margin="0,0,0,6" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                        <TextBlock Text="Motore istantaneo" FontSize="11" Margin="0,0,0,3" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <ComboBox x:Name="LiveBackendBox" DisplayMemberPath="Label" SelectionChanged="OnBackendChanged" />
+                                    </StackPanel>
+                                    <StackPanel x:Name="LiveModelPanel" Grid.Column="1" Margin="6,0,0,0">
+                                        <TextBlock Text="Modello Whisper istantaneo" FontSize="11" Margin="0,0,0,3" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <ComboBox x:Name="PartialModelBox" DisplayMemberPath="Id" SelectionChanged="OnModelChanged" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Padding="10" CornerRadius="6" Margin="0,0,0,12"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <TextBlock Text="Frase definitiva (a fine respiro)" FontWeight="Medium" Margin="0,0,0,6" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                        <TextBlock Text="Motore definitivo" FontSize="11" Margin="0,0,0,3" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <ComboBox x:Name="FinalBackendBox" DisplayMemberPath="Label" SelectionChanged="OnBackendChanged" />
+                                    </StackPanel>
+                                    <StackPanel x:Name="FinalModelPanel" Grid.Column="1" Margin="6,0,0,0">
+                                        <TextBlock Text="Modello Whisper definitivo" FontSize="11" Margin="0,0,0,3" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <ComboBox x:Name="FinalModelBox" DisplayMemberPath="Id" SelectionChanged="OnModelChanged" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock x:Name="ModelHint" Margin="0,0,0,8" TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                        <Separator Margin="0,8,0,12" />
+                        <TextBlock Text="Architettura e opzioni di traduzione" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        
+                        <TextBlock Text="Modalità pipeline" Margin="0,0,0,4" />
+                        <ComboBox x:Name="TranslationPipelineBox" DisplayMemberPath="Label"
+                                  SelectionChanged="OnTranslationPipelineChanged" />
+                        <TextBlock x:Name="TranslationPipelineHint" Margin="0,6,0,8" TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                        <TextBlock Text="Rifinitura di qualità (Marian ONNX)" Margin="0,4,0,4" />
                         <ComboBox x:Name="TranslationQualityBox" DisplayMemberPath="Label"
                                   SelectionChanged="OnTranslationQualityChanged" />
-                        <TextBlock x:Name="TranslationQualityHint" Margin="0,6,0,0" TextWrapping="Wrap"
+                        <TextBlock x:Name="TranslationQualityHint" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="11"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         <Button Content="Scarica i modelli di rifinitura (Marian ONNX)" Padding="10,4" Margin="0,8,0,0"
                                 Click="OnDownloadQualityModelsClicked" />
@@ -120,14 +167,6 @@
                         <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" FontSize="11"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    Text="Il programma funziona sempre su CPU. Le build Vulkan/CUDA vengono pubblicate solo dopo una verifica misurata: finché il profilo non le seleziona, restano indicate come sperimentali." />
-
-                        <Separator Margin="0,16,0,12" />
-                        <TextBlock Text="Modelli Whisper (usati quando il motore è Whisper)" Margin="0,0,0,4" />
-                        <ComboBox x:Name="PartialModelBox" DisplayMemberPath="Id" SelectionChanged="OnModelChanged" />
-                        <TextBlock Text="Modello per le frasi finali" Margin="0,12,0,4" />
-                        <ComboBox x:Name="FinalModelBox" DisplayMemberPath="Id" SelectionChanged="OnModelChanged" />
-                        <TextBlock x:Name="ModelHint" Margin="0,8,0,0" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

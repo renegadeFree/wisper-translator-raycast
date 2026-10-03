@@ -11,8 +11,8 @@ public sealed class SpeakerTracker : IDisposable
     // Finestra corta e passo largo: tiene l'uso CPU intorno al 20% di un core, non satura
     // la macchina e conserva le identità finché i parlanti si alternano nella conversazione.
     private const int MaxSeconds = 45;
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan MinNewAudio = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(2.5);
+    private static readonly TimeSpan MinNewAudio = TimeSpan.FromSeconds(1.0);
 
     private readonly NeMoDiarizationClient _client;
     private readonly object _gate = new();
@@ -27,6 +27,28 @@ public sealed class SpeakerTracker : IDisposable
     private bool _disposed;
 
     public SpeakerTracker(NeMoDiarizationClient client) => _client = client;
+
+    /// <summary>
+    /// Forza l'elaborazione immediata della finestra se c'è audio sufficiente e non stiamo già calcolando.
+    /// Viene invocato alla chiusura di un enunciato per ridurre a zero i tempi di attesa dell'etichetta parlante.
+    /// </summary>
+    public void TriggerNow()
+    {
+        var shouldRun = false;
+        lock (_gate)
+        {
+            if (!_disposed && !_busy && _buffer.Count >= (long)(SampleRate * 1.5) && _totalSamples - _samplesAtLastRun >= (long)(0.5 * SampleRate))
+            {
+                _busy = true;
+                shouldRun = true;
+            }
+        }
+
+        if (shouldRun)
+        {
+            _ = Task.Run(RunAsync);
+        }
+    }
 
     public void Append(ReadOnlySpan<float> samples)
     {
@@ -50,7 +72,7 @@ public sealed class SpeakerTracker : IDisposable
 
             if (!_busy
                 && peak >= 0.01f
-                && _buffer.Count >= SampleRate * 5
+                && _buffer.Count >= SampleRate * 2
                 && DateTime.UtcNow - _lastRun >= Interval
                 && _totalSamples - _samplesAtLastRun >= (long)(MinNewAudio.TotalSeconds * SampleRate))
             {

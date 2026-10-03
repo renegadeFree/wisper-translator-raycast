@@ -50,7 +50,10 @@ public static class NeMoSpeechHost
                 .EnsureAsync(cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
-            report("Carico Nemotron 3.5 in memoria...");
+            var diarizerEntry = diarModelPath is not null ? NeMoModels.DiarizerEntry(diarModelPath) : null;
+            report(diarizerEntry is not null
+                ? $"Carico Nemotron 3.5 e Diarizzazione ({diarizerEntry.DisplayName})..."
+                : "Carico Nemotron 3.5 in memoria...");
             var server = new NeMoSpeechServer(executable, model, diarModelPath: diarModelPath);
             if (!await server.EnsureStartedAsync(TimeSpan.FromSeconds(120), cancellationToken).ConfigureAwait(false))
             {

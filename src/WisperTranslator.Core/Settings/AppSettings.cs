@@ -85,6 +85,9 @@ public sealed class AppSettings
 
     public bool Translate { get; set; } = true;
 
+    /// <summary>Architettura di traduzione (doppia passata, solo istantanea, solo qualità).</summary>
+    public TranslationPipelineMode TranslationPipeline { get; set; } = TranslationPipelineMode.DualPass;
+
     /// <summary>Secondo stadio di traduzione (modello Marian ONNX): auto, spento o forzato.</summary>
     public QualityTranslationMode QualityTranslation { get; set; } = QualityTranslationMode.Auto;
 
@@ -204,7 +207,7 @@ public sealed class AppSettings
 
         // Il vecchio predefinito (Nemotron) resta selezionabile, ma per le call normali
         // Sortformer separa meglio le voci: si migra solo il valore rimasto al default.
-        if (string.Equals(DiarizerModelId, "nemotron-3-diarization", StringComparison.OrdinalIgnoreCase))
+        if (SettingsVersion < 4 && string.Equals(DiarizerModelId, "nemotron-3-diarization", StringComparison.OrdinalIgnoreCase))
         {
             DiarizerModelId = Asr.NeMoModels.DiarizerDefaultId;
         }
@@ -225,6 +228,8 @@ public sealed class AppSettings
         BarBuffer = Math.Clamp(BarBuffer, 3, 8);
         BarFontSize = double.IsFinite(BarFontSize) ? Math.Clamp(BarFontSize, 12, 28) : 15;
         if (!Enum.IsDefined(BarText)) BarText = BarTextMode.Entrambi;
+        if (!Enum.IsDefined(TranslationPipeline)) TranslationPipeline = TranslationPipelineMode.DualPass;
+        if (!Enum.IsDefined(QualityTranslation)) QualityTranslation = QualityTranslationMode.Auto;
         FontSize = double.IsFinite(FontSize) ? Math.Clamp(FontSize, 10, 48) : 16;
         OverlayFontSize = double.IsFinite(OverlayFontSize) ? Math.Clamp(OverlayFontSize, 12, 96) : 30;
         Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.2, 1) : 0.95;
@@ -270,6 +275,7 @@ public sealed class AppSettings
             SourceLanguage = SourceLanguage,
             TargetLanguage = SourceLanguage == "it" ? "en" : "it",
             Translate = Translate,
+            TranslationPipeline = TranslationPipeline,
             QualityTranslation = QualityTranslation,
             SystemAudio = SystemAudio,
             Microphone = Microphone,

@@ -3,6 +3,19 @@ using WisperTranslator.Core.Hardware;
 
 namespace WisperTranslator.Core.Session;
 
+/// <summary>Architettura della pipeline di traduzione.</summary>
+public enum TranslationPipelineMode
+{
+    /// <summary>Doppia passata: istantanea parola per parola + rifinitura neurale Marian ONNX.</summary>
+    DualPass,
+
+    /// <summary>Solo istantanea (Bergamot): continuo e leggero, senza secondo stadio.</summary>
+    FastOnly,
+
+    /// <summary>Solo qualità (Marian ONNX): nessun parziale grezzo, traduzione accurata su frase conclusa.</summary>
+    QualityOnly,
+}
+
 /// <summary>Come usare il secondo motore di traduzione (rifinitura di qualità).</summary>
 public enum QualityTranslationMode
 {
@@ -58,6 +71,9 @@ public sealed class SessionOptions
     public string? MicrophoneDeviceId { get; set; }
 
     public int TranslationPort { get; set; } = 8989;
+
+    /// <summary>Architettura di traduzione (doppia passata, solo istantanea, solo qualità).</summary>
+    public TranslationPipelineMode TranslationPipeline { get; set; } = TranslationPipelineMode.DualPass;
 
     /// <summary>
     /// Secondo stadio di traduzione: Auto lo attiva sulle macchine che lo reggono, Forzato lo

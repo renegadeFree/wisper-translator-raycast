@@ -67,11 +67,13 @@ public static class NeMoModels
     public const string DiarizerDefaultId = "diar-streaming-sortformer-4spk-v2";
 
     public static IReadOnlyList<ModelCatalogEntry> Diarizers { get; } =
-        [ModelCatalog.NemotronDiarization, ModelCatalog.SortformerDiarization];
+        [ModelCatalog.SortformerDiarization, ModelCatalog.NemotronDiarization];
 
     /// <summary>La voce di catalogo del diarizzatore scelto (il predefinito se l'id è ignoto).</summary>
     public static ModelCatalogEntry DiarizerEntry(string? id) =>
-        Diarizers.FirstOrDefault(entry => string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase))
+        Diarizers.FirstOrDefault(entry =>
+            string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(id) && (id.Contains(entry.Id, StringComparison.OrdinalIgnoreCase) || id.Contains(entry.FileName, StringComparison.OrdinalIgnoreCase))))
         ?? ModelCatalog.SortformerDiarization;
 
     public static bool IsDiarizerInstalled(string? id) => ModelStore.IsInstalled(DiarizerEntry(id));

@@ -868,11 +868,14 @@ public partial class MainWindow : FluentWindow
         await Task.Delay(700);
         Capture(Content as FrameworkElement ?? this, Path.Combine(directory, "pannello.png"), background, 10);
 
-        // Schede Conversazione e Barra.
+        // Schede Conversazione, Prestazioni e Barra.
         _settingsWindow = new SettingsWindow(_settings, () => { }, SettingsTabs.Barra) { Owner = this };
         _settingsWindow.Show();
         await Task.Delay(900);
         Capture(_settingsWindow.Content as FrameworkElement ?? _settingsWindow, Path.Combine(directory, "impostazioni-barra.png"), background, 10);
+        _settingsWindow.SelectTab(SettingsTabs.Prestazioni);
+        await Task.Delay(700);
+        Capture(_settingsWindow.Content as FrameworkElement ?? _settingsWindow, Path.Combine(directory, "impostazioni-prestazioni.png"), background, 10);
         _settingsWindow.SelectTab(SettingsTabs.Conversazione);
         await Task.Delay(700);
         Capture(_settingsWindow.Content as FrameworkElement ?? _settingsWindow, Path.Combine(directory, "impostazioni-conversazione.png"), background, 10);

@@ -72,10 +72,10 @@ public partial class SettingsWindow : FluentWindow
         DiarizerBox.ItemsSource = NeMoModels.Diarizers
             .Select(entry => new DiarizerOption(entry.Id, $"{entry.DisplayName} · {entry.License}"))
             .ToList();
-        DiarizerBox.SelectedIndex = Math.Max(
-            0,
-            ((List<DiarizerOption>)DiarizerBox.ItemsSource)
-            .FindIndex(option => option.Id == _settings.DiarizerModelId));
+        var selectedIndex = ((List<DiarizerOption>)DiarizerBox.ItemsSource)
+            .FindIndex(option => string.Equals(option.Id, _settings.DiarizerModelId, StringComparison.OrdinalIgnoreCase)
+                              || (!string.IsNullOrEmpty(_settings.DiarizerModelId) && option.Id.Contains(_settings.DiarizerModelId, StringComparison.OrdinalIgnoreCase)));
+        DiarizerBox.SelectedIndex = Math.Max(0, selectedIndex);
         RefreshDiarizerHint();
     }
 
@@ -269,11 +269,24 @@ public partial class SettingsWindow : FluentWindow
 
         LiveBackendBox.ItemsSource = BackendOptions();
         LiveBackendBox.SelectedItem = ((IEnumerable<BackendOption>)LiveBackendBox.ItemsSource)
-            .First(option => option.Value == _settings.LiveBackend);
+            .FirstOrDefault(option => option.Value == _settings.LiveBackend)
+            ?? ((IEnumerable<BackendOption>)LiveBackendBox.ItemsSource).First();
         FinalBackendBox.ItemsSource = BackendOptions();
         FinalBackendBox.SelectedItem = ((IEnumerable<BackendOption>)FinalBackendBox.ItemsSource)
-            .First(option => option.Value == _settings.FinalBackend);
+            .FirstOrDefault(option => option.Value == _settings.FinalBackend)
+            ?? ((IEnumerable<BackendOption>)FinalBackendBox.ItemsSource).First();
         UpdatePresetHint();
+
+        TranslationPipelineBox.ItemsSource = new[]
+        {
+            new PipelineOption(TranslationPipelineMode.DualPass, "Doppia passata (Istantanea Bergamot + Rifinitura Marian ONNX)"),
+            new PipelineOption(TranslationPipelineMode.FastOnly, "Solo veloce istantanea (Bergamot parola per parola, nessun secondo passaggio)"),
+            new PipelineOption(TranslationPipelineMode.QualityOnly, "Solo qualità finale (Marian ONNX sulla frase completa, nessun tremolio iniziale)"),
+        };
+        TranslationPipelineBox.SelectedItem = ((IEnumerable<PipelineOption>)TranslationPipelineBox.ItemsSource)
+            .FirstOrDefault(option => option.Value == _settings.TranslationPipeline)
+            ?? ((IEnumerable<PipelineOption>)TranslationPipelineBox.ItemsSource).First();
+        RefreshTranslationPipelineHint();
 
         TranslationQualityBox.ItemsSource = new[]
         {
@@ -383,12 +396,60 @@ public partial class SettingsWindow : FluentWindow
         }
     }
 
+    private sealed record PipelineOption(TranslationPipelineMode Value, string Label);
+
+    private void OnTranslationPipelineChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading || TranslationPipelineBox.SelectedItem is not PipelineOption option)
+        {
+            return;
+        }
+
+        _settings.TranslationPipeline = option.Value;
+        RefreshTranslationPipelineHint();
+        _onChanged();
+    }
+
+    private void RefreshTranslationPipelineHint()
+    {
+        if (TranslationPipelineHint is null)
+        {
+            return;
+        }
+
+        TranslationPipelineHint.Text = _settings.TranslationPipeline switch
+        {
+            TranslationPipelineMode.FastOnly => "Traduzione ultra-reattiva a ogni parola con Bergamot locale. Nessun secondo passaggio Marian ONNX per il massimo risparmio di risorse.",
+            TranslationPipelineMode.QualityOnly => "Traduzione accurata con Marian ONNX eseguita direttamente a fine frase. Elimina le correzioni provvisorie parola per parola.",
+            _ => "Doppia passata: traduzione immediata parola per parola durante il parlato, seguita da rifinitura accurata con Marian ONNX a frase conclusa.",
+        };
+
+        if (TranslationQualityBox is not null)
+        {
+            TranslationQualityBox.IsEnabled = _settings.TranslationPipeline != TranslationPipelineMode.FastOnly;
+        }
+    }
+
+    private void OnBackendChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _settings.LiveBackend = (LiveBackendBox.SelectedItem as BackendOption)?.Value;
+        _settings.FinalBackend = (FinalBackendBox.SelectedItem as BackendOption)?.Value;
+        UpdatePresetHint();
+        _onChanged();
+        RefreshModels();
+    }
+
     private static IReadOnlyList<BackendOption> BackendOptions() =>
     [
-        new BackendOption(null, "Dal profilo"),
-        new BackendOption(AsrBackend.WhisperCpu, "Whisper (CPU)"),
-        new BackendOption(AsrBackend.Vosk, "Vosk (leggero)"),
-        new BackendOption(AsrBackend.NeMoSpeech, "NeMo-Speech"),
+        new BackendOption(null, "Automatico (dal profilo)"),
+        new BackendOption(AsrBackend.NeMoSpeech, "NeMo Nemotron 3.5"),
+        new BackendOption(AsrBackend.WhisperCpu, "Whisper CPU (modello a scelta)"),
+        new BackendOption(AsrBackend.Vosk, "Vosk (ultra-leggero)"),
     ];
 
     private sealed record PresetOption(PerformancePreset Value, string Label);
@@ -400,13 +461,23 @@ public partial class SettingsWindow : FluentWindow
         var profile = _settings.ResolveProfile();
         PresetHint.Text = $"{profile.Label}: {profile.Note}";
         ProfileSummaryText.Text = DescribeProfile(profile);
+
+        if (LiveModelPanel is not null)
+        {
+            LiveModelPanel.Visibility = profile.Live == AsrBackend.WhisperCpu ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (FinalModelPanel is not null)
+        {
+            FinalModelPanel.Visibility = profile.Final == AsrBackend.WhisperCpu ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>Riepilogo leggibile: motore, modello e stato di installazione per ogni corsia.</summary>
     private string DescribeProfile(PerformanceProfile profile)
     {
-        return $"Testo immediato: {DescribeEngine(profile.Live, live: true)}{Environment.NewLine}"
-               + $"Frase definitiva: {DescribeEngine(profile.Final, live: false)}";
+        return $"• Corsia istantanea: {DescribeEngine(profile.Live, live: true)}{Environment.NewLine}"
+               + $"• Corsia definitiva: {DescribeEngine(profile.Final, live: false)}";
     }
 
     private string DescribeEngine(AsrBackend backend, bool live)

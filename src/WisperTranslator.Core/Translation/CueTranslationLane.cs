@@ -1,3 +1,5 @@
+using WisperTranslator.Core.Session;
+
 namespace WisperTranslator.Core.Translation;
 
 /// <summary>
@@ -25,6 +27,7 @@ public sealed class CueTranslationLane : IDisposable
     private readonly int _cueId;
     private readonly TranslationService _fast;
     private readonly TranslationService? _quality;
+    private readonly TranslationPipelineMode _mode;
     private readonly SemaphoreSlim _fastGate;
     private readonly SemaphoreSlim _qualityGate;
     private readonly Func<(string From, string To)> _languages;
@@ -62,7 +65,8 @@ public sealed class CueTranslationLane : IDisposable
         CancellationToken sessionToken = default,
         TimeSpan? debounce = null,
         int qualityWordStep = DefaultQualityWordStep,
-        TimeSpan? qualityInterval = null)
+        TimeSpan? qualityInterval = null,
+        TranslationPipelineMode mode = TranslationPipelineMode.DualPass)
     {
         ArgumentNullException.ThrowIfNull(fast);
         ArgumentNullException.ThrowIfNull(fastGate);
@@ -73,6 +77,7 @@ public sealed class CueTranslationLane : IDisposable
         _cueId = cueId;
         _fast = fast;
         _quality = quality;
+        _mode = mode;
         _fastGate = fastGate;
         _qualityGate = qualityGate;
         _languages = languages;
@@ -82,8 +87,8 @@ public sealed class CueTranslationLane : IDisposable
         _qualityWordStep = Math.Max(1, qualityWordStep);
         _qualityInterval = qualityInterval ?? DefaultQualityInterval;
         _stop = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
-        _fastWorker = Task.Run(FastLoopAsync);
-        _qualityWorker = quality is null ? Task.CompletedTask : Task.Run(QualityLoopAsync);
+        _fastWorker = mode == TranslationPipelineMode.QualityOnly ? Task.CompletedTask : Task.Run(FastLoopAsync);
+        _qualityWorker = quality is null || mode == TranslationPipelineMode.FastOnly ? Task.CompletedTask : Task.Run(QualityLoopAsync);
     }
 
     /// <summary>La battuta ha finito entrambi i passaggi: la corsia può essere archiviata.</summary>
@@ -127,7 +132,7 @@ public sealed class CueTranslationLane : IDisposable
                 _finalGeneration = _generation;
             }
 
-            wantsQuality = isFinal || QualityDueLocked(text, Environment.TickCount64);
+            wantsQuality = isFinal || (_mode == TranslationPipelineMode.DualPass && QualityDueLocked(text, Environment.TickCount64));
             if (wantsQuality)
             {
                 _qualityWords = CountWords(text);
@@ -135,8 +140,12 @@ public sealed class CueTranslationLane : IDisposable
             }
         }
 
-        Signal(_fastSignal);
-        if (wantsQuality)
+        if (_mode != TranslationPipelineMode.QualityOnly)
+        {
+            Signal(_fastSignal);
+        }
+
+        if (wantsQuality && _mode != TranslationPipelineMode.FastOnly)
         {
             Signal(_qualitySignal);
         }
@@ -307,8 +316,8 @@ public sealed class CueTranslationLane : IDisposable
             }
 
             finished = _finalGeneration > 0
-                       && _fastPublished >= _finalGeneration
-                       && (_quality is null || _qualityPublished >= _finalGeneration);
+                       && (_mode == TranslationPipelineMode.QualityOnly || _fastPublished >= _finalGeneration)
+                       && (_quality is null || _mode == TranslationPipelineMode.FastOnly || _qualityPublished >= _finalGeneration);
         }
 
         _publish(_cueId, translation, quality);

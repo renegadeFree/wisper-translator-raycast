@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\WisperTranslator.Core\WisperTranslator.Core.csproj" />
@@ -23,7 +23,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>WisperTranslator.App</AssemblyName>
-    <Version>2.50</Version>
+    <Version>2.51</Version>
     <Product>Wisper Translator</Product>
     <Company>Wisper Translator</Company>
     <Copyright>MIT License</Copyright>
