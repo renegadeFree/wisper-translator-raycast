@@ -1011,6 +1011,88 @@ scalata nel riquadro utile (Graphviz non applica `page=` in questa build): la pa
 può quindi essere più larga o più alta di A4, senza tagli. È il comportamento tipico degli inserti
 di diagramma e resta leggibile a stampa.
 
+---
+
+## 14. Lavorazione v2.0 — conversazione con parlanti e barra Apple-style (F23–F26)
+
+Richiesta dell'utente (2026-10-03): «se volessi trascrivere una conversazione, magari una meet tra
+due o più persone o una call whatsapp, vorrei avere l'opzione, traduzione o solo trascrizione nel
+pannello», «implementa tutte le variabili del caso, quindi regole di riconoscimento vocale tra vari
+utenti», «vorrei una versione con una barra (che possa spostare dove voglio) simile a wispr flow,
+apple style, con massimo 5 frasi di cui solo le prime 2 visibili», «fluttuante con grafica
+acrilica», «poi fai push e release».
+
+### F23 — Modalità conversazione e diarizzazione (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F23.1 | Diarizzatore predefinito **Nemotron-3-Diarization q8**: 107.012.128 byte, SHA-256 `08456d9e22cd9a323c0364d98375f3746d6e68507ebb705cd46438c534c7a3a1`, fino a 8 parlanti, OpenMDW-1.1 | ✅ hash calcolato sul file scaricato |
+| F23.2 | Alternativa **Sortformer 4spk v2 q8**: 147.075.776 byte, SHA-256 `0679cfeb1ce356d0dea9470b31274f4bfc7eb927497d82005483770666da998a`, CC-BY-4.0 | ✅ nel catalogo |
+| F23.3 | Processo NeMo avviato con `--diar-model` **e** `--diar-preset offline`: diarizziamo solo frasi concluse, quindi non si paga latenza e la classificazione è più stabile | ✅ verificato |
+| F23.4 | La corsia finale invia `diarization=true` + `response_format=verbose_json` e raggruppa `words[].speaker` in turni | ✅ verificato sul server |
+| F23.5 | **Corsie indipendenti**: un `RealtimeTranscriber` per sorgente; microfono = "Tu" (nessuna diarizzazione), audio di sistema = parlanti | ✅ |
+| F23.6 | Id battuta per corsia (`(corsia, enunciato) → id`): microfono e sistema non si sovrascrivono più a vicenda | ✅ |
+| F23.7 | Frase finale con più voci **spezzata in più battute**: la provvisoria diventa il primo turno, le altre si accodano | ✅ |
+| F23.8 | Degradazione dichiarata: senza motore NeMo o su profilo Reattivo resta sempre una trascrizione, senza nomi | ✅ |
+| F23.9 | Schema: `ALTER TABLE cues ADD COLUMN speaker INTEGER NOT NULL DEFAULT 0` guardato, gli archivi v1 continuano ad aprirsi | ✅ test dedicato |
+| F23.10 | **Misure reali** (sessione #10, clip a 2 voci EN→IT, audio di sistema + microfono, diarizzazione attiva): parziali **73–600 ms**, finali **82–1560 ms**, stop **101 ms** | ✅ misurato |
+| F23.11 | Test automatici: **78 verdi** (67 esistenti + 11 nuovi su parlanti, SRT, PDF, catalogo, migrazione DB) | ✅ |
+
+### F24 — Barra fluttuante Apple-style (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F24.1 | `BarWindow`: `FluentWindow` senza bordi, **acrilico** (verificato: i pixel dentro la barra seguono lo sfondo), angoli arrotondati, fuori dalla barra delle applicazioni, sempre in primo piano | ✅ verificato a pixel |
+| F24.2 | Trascinabile da tutta la superficie, si aggancia ai bordi entro 16 px, posizione ricordata | ✅ |
+| F24.3 | Viewport **2 frasi** (regolabile 1–3) e buffer **5** (3–8): le frasi sotto si raggiungono con la rotellina | ✅ |
+| F24.4 | Riga = pallino colorato + etichetta parlante + originale attenuato + traduzione | ✅ |
+| F24.5 | Animazioni: comparsa slide+fade 220 ms cubic-out, alone che respira in ascolto, controlli all'hover in 160 ms, opzione per ridurle | ✅ |
+| F24.6 | **Modalità discreta** via `WM_NCHITTEST`: i clic passano attraverso la finestra tranne che sulla maniglia | ✅ |
+| F24.7 | Un errore di XAML non sparisce più nel nulla (l'icona inesistente `PanelRightExpand24` aveva reso la barra invisibile senza messaggi) | ✅ corretto |
+| F24.8 | Barra come superficie d'avvio predefinita; il pannello resta e si apre dal menu | ✅ |
+
+### F25 — Parlanti in sessioni, IA ed export (✅)
+
+| # | Attività | Esito |
+|---|---|---|
+| F25.1 | Etichetta del parlante nel pannello, nella barra e nel dettaglio sessione, con colore stabile per voce | ✅ |
+| F25.2 | Export: **SRT** con `<v Speaker 1>` / `<v Tu>`, **TXT** con `Speaker 1: …`, **JSON** con `speaker` e `speakerName` | ✅ |
+| F25.3 | Nuova sezione PDF **Partecipanti rilevati** (battute, tempo di parola, quota) calcolata **in locale**, aggiunta ai template *Verbale di riunione* e *Intervista* | ✅ |
+| F25.4 | I prompt IA ricevono la trascrizione con i nomi dei parlanti | ✅ |
+| F25.5 | Nuove schede **Conversazione** e **Barra**; gli indici sono centralizzati in `SettingsTabs` così le scorciatoie `--settings=n` restano valide | ✅ |
+
+### F26 — Test, documentazione e release v2.0.0 (🔄)
+
+| # | Attività | Esito |
+|---|---|---|
+| F26.1 | Test automatici: **78 verdi** | ✅ |
+| F26.2 | `docs/CONVERSAZIONE.md`, README illustrato con screenshot reali, `THIRD-PARTY-NOTICES.md` con le licenze dei diarizzatori | 🔄 |
+| F26.3 | Installer 2.0.0 e installazione silenziosa | 🔄 |
+| F26.4 | Push su `main`, tag `v2.0.0` e release con installer e SHA-256 | 🔄 |
+
+**Comandi aggiunti per le verifiche:**
+
+| Comando | Cosa fa |
+|---|---|
+| `wisper diarize <file> [--lang en] [--diarizer <id>]` | prova il percorso completo della modalità conversazione (server + engine + turni) |
+| `wisper tts --voices "voce1,voce2" --lines 4` | genera una clip con più voci alternate, per provare la diarizzazione |
+| `app.exe --autostart --autostop <secondi>` | collaudo automatico di avvio e fermata (registra il tempo di stop in `logs/autostop.txt`) |
+
+**Decisioni della v2.0:**
+
+| # | Decisione | Perché |
+|---|---|---|
+| D-24 | Diarizzatore predefinito **Nemotron-3** (8 parlanti, OpenMDW-1.1) invece di Sortformer (4, CC-BY-4.0), che resta scaricabile | Copre le call affollate, pesa 40 MB in meno ed è utilizzabile commercialmente |
+| D-25 | Etichette **anonime** `Speaker 1…8` e "Tu" per il microfono; nessun profilo vocale persistente (scelta dell'utente) | Nessun modello in più, nessun dato biometrico conservato |
+| D-26 | `--diar-preset offline` sul processo NeMo | Le frasi arrivano già concluse: si guadagna precisione senza pagare latenza |
+| D-27 | La barra è la superficie d'avvio predefinita, il pannello resta completo | È il caso d'uso quotidiano: sottotitoli sempre visibili e spostabili |
+| D-28 | Con microfono e audio di sistema accesi, la stessa frase può comparire due volte ("Tu" e "Speaker N") | È la conseguenza voluta di due corsie separate; con le cuffie il microfono non risente degli altoparlanti |
+| D-29 | Voci sintetiche dello stesso sesso sono un caso difficile per il diarizzatore: nei test le ha in parte unite | Limite del modello dichiarato: la verifica vera è una call reale |
+
+**Limiti dichiarati (misurati, non stimati):** la diarizzazione aggiunge ~150 MB di RAM e circa
+0,1–0,3 s per frase definitiva; con voci sovrapposte o timbri simili le etichette possono scambiarsi;
+il diarizzatore riconosce al massimo 8 parlanti.
+
 - **Loopback**: cattura dell'audio che il PC sta riproducendo, senza cavi né "Stereo Mix".
 - **VAD**: rilevatore di attività vocale; separa parlato e silenzio.
 - **Enunciato**: porzione di audio compresa tra due silenzi, inviata all'ASR.

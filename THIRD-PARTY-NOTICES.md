@@ -29,6 +29,8 @@ per ognuno è indicata la licenza e l'obbligo che ne deriva.
 | **Vosk** (runtime + modelli small it/en) | Apache-2.0 | pacchetto NuGet `Vosk` incluso; i modelli (34-50 MB) si scaricano dal sito Vosk |
 | **NeMo-Speech.cpp** (runtime Windows) | Apache-2.0 | scaricato da GitHub; eseguito come processo locale |
 | **Nemotron 3.5 ASR Streaming 0.6B (q8_0)** | OpenMDW-1.1 | scaricato da Hugging Face; il modello non è ridistribuito con l'applicazione |
+| **Nemotron 3 Diarization (q8_0)** | OpenMDW-1.1 | diarizzatore predefinito della modalità conversazione; uso commerciale consentito, scaricato su richiesta |
+| **Sortformer 4 parlanti v2 (q8_0)** | CC-BY-4.0 | diarizzatore alternativo; l'attribuzione è indicata nella scheda Modelli |
 | **Graphviz** (Windows x64) | EPL-1.0 | scaricato da GitLab ufficiale; usato come processo locale per impaginare le mappe |
 | **Parakeet TDT 0.6B v3** | CC-BY-4.0 | opzione futura per la corsia finale, non ancora distribuita |
 

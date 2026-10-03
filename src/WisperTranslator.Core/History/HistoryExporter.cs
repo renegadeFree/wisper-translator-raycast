@@ -18,14 +18,17 @@ public static class HistoryExporter
             builder.AppendLine(index.ToString(CultureInfo.InvariantCulture));
             builder.AppendLine($"{Timecode(start)} --> {Timecode(end)}");
 
+            // <v Nome> è la convenzione dei sottotitoli per il parlante: i player la ignorano
+            // se non la conoscono, quindi non serve un formato alternativo.
+            var voice = cue.HasSpeaker ? $"<v {cue.SpeakerLabel}>" : string.Empty;
             if (includeOriginal && cue.Translation.Trim().Length > 0)
             {
-                builder.AppendLine(cue.Translation.Trim());
+                builder.AppendLine(voice + cue.Translation.Trim());
                 builder.AppendLine(cue.Original.Trim());
             }
             else
             {
-                builder.AppendLine((cue.Translation.Trim().Length > 0 ? cue.Translation : cue.Original).Trim());
+                builder.AppendLine(voice + (cue.Translation.Trim().Length > 0 ? cue.Translation : cue.Original).Trim());
             }
 
             builder.AppendLine();
@@ -40,17 +43,18 @@ public static class HistoryExporter
         var builder = new StringBuilder();
         foreach (var cue in cues)
         {
+            var who = cue.HasSpeaker ? $"{cue.SpeakerLabel}: " : string.Empty;
             if (includeOriginal)
             {
-                builder.AppendLine($"[{cue.AudioStart:mm\\:ss}] {cue.Original}");
+                builder.AppendLine($"[{cue.AudioStart:mm\\:ss}] {who}{cue.Original}");
                 if (cue.Translation.Trim().Length > 0)
                 {
-                    builder.AppendLine($"          {cue.Translation}");
+                    builder.AppendLine($"          {who}{cue.Translation}");
                 }
             }
             else
             {
-                builder.AppendLine(cue.Translation.Trim().Length > 0 ? cue.Translation : cue.Original);
+                builder.AppendLine(who + (cue.Translation.Trim().Length > 0 ? cue.Translation : cue.Original));
             }
         }
 
@@ -77,6 +81,8 @@ public static class HistoryExporter
                 cue.Original,
                 cue.Translation,
                 cue.IsFinal,
+                Speaker = cue.Speaker,
+                SpeakerName = cue.HasSpeaker ? cue.SpeakerLabel : null,
             }),
         };
 

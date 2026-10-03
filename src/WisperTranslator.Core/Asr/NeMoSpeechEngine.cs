@@ -13,12 +13,18 @@ public sealed class NeMoSpeechEngine : IAsrEngine
 {
     private readonly NeMoSpeechServer _server;
     private readonly bool _ownsServer;
+    private readonly bool _diarize;
 
-    public NeMoSpeechEngine(NeMoSpeechServer server, string? name = null, bool ownsServer = true)
+    public NeMoSpeechEngine(
+        NeMoSpeechServer server,
+        string? name = null,
+        bool ownsServer = true,
+        bool diarize = false)
     {
         _server = server;
         _ownsServer = ownsServer;
-        Name = name ?? "NeMo Nemotron 3.5";
+        _diarize = diarize;
+        Name = name ?? (diarize ? "NeMo Nemotron 3.5 + parlanti" : "NeMo Nemotron 3.5");
     }
 
     public string Name { get; }
@@ -43,6 +49,13 @@ public sealed class NeMoSpeechEngine : IAsrEngine
             content.Add(new StringContent(language), "language");
         }
 
+        if (_diarize)
+        {
+            // verbose_json è obbligatorio per avere words[].speaker dal diarizzatore.
+            content.Add(new StringContent("verbose_json"), "response_format");
+            content.Add(new StringContent("true"), "diarization");
+        }
+
         using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
         using var response = await client
             .PostAsync($"http://127.0.0.1:{_server.Port}/v1/audio/transcriptions", content, cancellationToken)
@@ -60,7 +73,47 @@ public sealed class NeMoSpeechEngine : IAsrEngine
             language,
             audioDuration,
             watch.Elapsed,
-            []);
+            GroupBySpeaker(payload?.Words));
+    }
+
+    /// <summary>
+    /// Parole consecutive dello stesso parlante diventano un turno: la sessione può così
+    /// spezzare un enunciato in cui si sono sentite due voci diverse.
+    /// </summary>
+    internal static IReadOnlyList<AsrSegment> GroupBySpeaker(List<TranscriptionWord>? words)
+    {
+        if (words is null || words.Count == 0 || words.All(word => word.Speaker is null or 0))
+        {
+            return [];
+        }
+
+        var segments = new List<AsrSegment>();
+        foreach (var word in words)
+        {
+            var speaker = word.Speaker ?? 0;
+            var start = TimeSpan.FromSeconds(Math.Max(0, word.Start));
+            var end = TimeSpan.FromSeconds(Math.Max(word.End, word.Start));
+            var text = word.Word?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (segments.Count > 0 && segments[^1].Speaker == speaker)
+            {
+                var previous = segments[^1];
+                segments[^1] = previous with
+                {
+                    Text = $"{previous.Text} {text}",
+                    Duration = end - previous.Start,
+                };
+                continue;
+            }
+
+            segments.Add(new AsrSegment(text, start, end - start, speaker));
+        }
+
+        return segments;
     }
 
     /// <summary>WAV PCM16 mono in memoria: è il formato che il server accetta senza conversioni.</summary>
@@ -99,5 +152,7 @@ public sealed class NeMoSpeechEngine : IAsrEngine
         }
     }
 
-    private sealed record TranscriptionResponse(string? Text);
+    internal sealed record TranscriptionResponse(string? Text, List<TranscriptionWord>? Words);
+
+    internal sealed record TranscriptionWord(string? Word, double Start, double End, int? Speaker);
 }

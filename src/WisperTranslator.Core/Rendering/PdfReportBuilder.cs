@@ -5,6 +5,7 @@ using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 using WisperTranslator.Core.Ai;
 using WisperTranslator.Core.History;
+using WisperTranslator.Core.Session;
 using WisperTranslator.Core.Templates;
 
 namespace WisperTranslator.Core.Rendering;
@@ -65,6 +66,10 @@ public static class PdfReportBuilder
                 case PdfSectionKind.Transcript:
                     writer.Heading(section.Title);
                     writer.Transcript(cues, section.ShowOriginal, section.ShowTimestamps);
+                    break;
+
+                case PdfSectionKind.Speakers:
+                    writer.Speakers(section.Title, cues);
                     break;
 
                 case PdfSectionKind.Summary:
@@ -144,19 +149,37 @@ public static class PdfReportBuilder
                     foreach (var cue in cues)
                     {
                         var stamp = section.ShowTimestamps ? $"[{cue.AudioStart:mm\\:ss}] " : string.Empty;
+                        var who = cue.HasSpeaker ? $"**{cue.SpeakerLabel}:** " : string.Empty;
                         if (section.ShowOriginal)
                         {
-                            text.AppendLine($"{stamp}_{cue.Original}_");
+                            text.AppendLine($"{stamp}{who}_{cue.Original}_");
                         }
 
                         if (cue.Translation.Length > 0)
                         {
-                            text.AppendLine(cue.Translation);
+                            text.AppendLine(who + cue.Translation);
                         }
 
                         text.AppendLine();
                     }
 
+                    break;
+
+                case PdfSectionKind.Speakers:
+                    var totals = SpeakerTotals(cues);
+                    if (totals.Count == 0)
+                    {
+                        break;
+                    }
+
+                    text.AppendLine($"## {section.Title}").AppendLine();
+                    foreach (var speaker in totals)
+                    {
+                        text.AppendLine(
+                            $"- {speaker.Label}: {speaker.Cues} battute, {speaker.Share:P0} del tempo di parola");
+                    }
+
+                    text.AppendLine();
                     break;
             }
         }
@@ -167,6 +190,27 @@ public static class PdfReportBuilder
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// Conta le battute per parlante sommando le durate: è tutto calcolato in locale, senza IA.
+    /// </summary>
+    public static IReadOnlyList<SpeakerTotal> SpeakerTotals(IReadOnlyList<HistoryCue> cues)
+    {
+        var total = cues.Where(cue => cue.HasSpeaker).Sum(cue => cue.Duration.TotalSeconds);
+        return
+        [
+            .. cues
+                .Where(cue => cue.HasSpeaker)
+                .GroupBy(cue => cue.Speaker)
+                .Select(group => new SpeakerTotal(
+                    group.Key,
+                    Speakers.Label(group.Key, "Partecipanti"),
+                    group.Count(),
+                    group.Sum(cue => cue.Duration.TotalSeconds),
+                    total > 0 ? group.Sum(cue => cue.Duration.TotalSeconds) / total : 0))
+                .OrderByDescending(speaker => speaker.Seconds),
+        ];
     }
 
     /// <summary>Impaginazione: stato della pagina corrente, font e colori del template.</summary>
@@ -332,9 +376,10 @@ public static class PdfReportBuilder
             foreach (var cue in cues)
             {
                 var stamp = showTimestamps ? $"[{cue.AudioStart:mm\\:ss}] " : string.Empty;
+                var who = cue.HasSpeaker ? $"{cue.SpeakerLabel}: " : string.Empty;
                 if (showOriginal && cue.Original.Length > 0)
                 {
-                    foreach (var line in Wrap(stamp + cue.Original, _original, UsableWidth))
+                    foreach (var line in Wrap(stamp + who + cue.Original, _original, UsableWidth))
                     {
                         EnsureSpace(13);
                         _graphics!.DrawString(line, _original, _subtle, new XRect(_margin, _cursor, UsableWidth, 13), XStringFormats.TopLeft);
@@ -344,7 +389,7 @@ public static class PdfReportBuilder
 
                 if (cue.Translation.Trim().Length > 0)
                 {
-                    foreach (var line in Wrap(cue.Translation, _body, UsableWidth - 12))
+                    foreach (var line in Wrap(who + cue.Translation, _body, UsableWidth - 12))
                     {
                         EnsureSpace(14);
                         _graphics!.DrawString(line, _body, _text, new XRect(_margin + 12, _cursor, UsableWidth - 12, 14), XStringFormats.TopLeft);
@@ -354,6 +399,30 @@ public static class PdfReportBuilder
 
                 _cursor += 6;
             }
+        }
+
+        /// <summary>Elenco dei partecipanti: chi ha parlato, quanto e per quante battute.</summary>
+        public void Speakers(string title, IReadOnlyList<HistoryCue> cues)
+        {
+            var totals = SpeakerTotals(cues);
+            if (totals.Count == 0)
+            {
+                return;
+            }
+
+            Heading(title);
+            foreach (var speaker in totals)
+            {
+                var minutes = TimeSpan.FromSeconds(speaker.Seconds);
+                Draw(
+                    $"• {speaker.Label} — {speaker.Cues} battute, {speaker.Share:P0} del tempo di parola ({minutes:mm\\:ss})",
+                    _body,
+                    _text,
+                    16,
+                    3);
+            }
+
+            _cursor += 8;
         }
 
         /// <summary>
@@ -519,3 +588,6 @@ public static class PdfReportBuilder
         }
     }
 }
+
+/// <summary>Quanto ha parlato un partecipante: battute, secondi e quota sul totale.</summary>
+public sealed record SpeakerTotal(int Speaker, string Label, int Cues, double Seconds, double Share);

@@ -16,6 +16,22 @@ using Wpf.Ui.Controls;
 
 namespace WisperTranslator.App.Windows;
 
+/// <summary>
+/// Indici delle schede delle impostazioni: un solo posto da aggiornare quando l'ordine cambia,
+/// così le scorciatoie <c>--settings=n</c> e i menu restano allineati.
+/// </summary>
+public static class SettingsTabs
+{
+    public const int Aspetto = 0;
+    public const int Prestazioni = 1;
+    public const int Conversazione = 2;
+    public const int Barra = 3;
+    public const int Modelli = 4;
+    public const int Template = 5;
+    public const int Storico = 6;
+    public const int Ia = 7;
+}
+
 public partial class SettingsWindow : FluentWindow
 {
     private readonly AppSettings _settings;
@@ -31,6 +47,8 @@ public partial class SettingsWindow : FluentWindow
         InitializeComponent();
         LoadControls();
         LoadAiControls();
+        LoadConversationControls();
+        LoadBarControls();
         _loading = false;
         RefreshModels();
         RefreshHistory();
@@ -42,8 +60,141 @@ public partial class SettingsWindow : FluentWindow
         }
     }
 
-    /// <summary>Seleziona una scheda (0 aspetto, 1 modelli, 2 storico, 3 IA).</summary>
+    /// <summary>Seleziona una scheda (vedi <see cref="SettingsTabs"/>).</summary>
     public void SelectTab(int index) => Tabs.SelectedIndex = Math.Clamp(index, 0, Tabs.Items.Count - 1);
+
+    // --- Conversazione (diarizzazione) ---
+
+    private void LoadConversationControls()
+    {
+        ConversationCheck.IsChecked = _settings.ConversationMode;
+        DiarizerBox.ItemsSource = NeMoModels.Diarizers
+            .Select(entry => new DiarizerOption(entry.Id, $"{entry.DisplayName} · {entry.License}"))
+            .ToList();
+        DiarizerBox.SelectedIndex = Math.Max(
+            0,
+            ((List<DiarizerOption>)DiarizerBox.ItemsSource)
+            .FindIndex(option => option.Id == _settings.DiarizerModelId));
+        RefreshDiarizerHint();
+    }
+
+    private void RefreshDiarizerHint()
+    {
+        var entry = NeMoModels.DiarizerEntry(_settings.DiarizerModelId);
+        var installed = NeMoModels.IsDiarizerInstalled(_settings.DiarizerModelId);
+        var size = NeMoModels.DiarizerSize(_settings.DiarizerModelId);
+        DiarizerHint.Text = installed
+            ? $"{entry.About} Installato: {InstalledModel.FormatSize(size)}."
+            : $"{entry.About} Da scaricare: {InstalledModel.FormatSize(entry.ExpectedSizeBytes)} circa.";
+        DiarizerDownloadButton.IsEnabled = !installed;
+    }
+
+    private void OnConversationChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _settings.ConversationMode = ConversationCheck.IsChecked == true;
+        _onChanged();
+    }
+
+    private void OnDiarizerChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading || DiarizerBox.SelectedItem is not DiarizerOption option)
+        {
+            return;
+        }
+
+        _settings.DiarizerModelId = option.Id;
+        RefreshDiarizerHint();
+        _onChanged();
+    }
+
+    private async void OnDownloadDiarizerClicked(object sender, RoutedEventArgs e)
+    {
+        var entry = NeMoModels.DiarizerEntry(_settings.DiarizerModelId);
+        DiarizerDownloadButton.IsEnabled = false;
+        DiarizerProgress.Visibility = Visibility.Visible;
+        DiarizerProgress.Value = 0;
+
+        try
+        {
+            var progress = new Progress<long>(done =>
+            {
+                DiarizerProgress.Value = entry.ExpectedSizeBytes > 0
+                    ? Math.Min(100, done * 100.0 / entry.ExpectedSizeBytes)
+                    : 0;
+                DiarizerStatusText.Text = $"Scarico {entry.DisplayName}: {InstalledModel.FormatSize(done)}";
+            });
+
+            DiarizerStatusText.Text = $"Scarico {entry.DisplayName}…";
+            await NeMoModels.EnsureDiarizerAsync(_settings.DiarizerModelId, progress);
+            DiarizerStatusText.Text = "Diarizzatore installato e verificato.";
+        }
+        catch (Exception exception)
+        {
+            DiarizerStatusText.Text = $"Download non riuscito: {exception.Message}";
+        }
+        finally
+        {
+            DiarizerProgress.Visibility = Visibility.Collapsed;
+            RefreshDiarizerHint();
+            RefreshModels();
+        }
+    }
+
+    private async void OnVerifyDiarizerClicked(object sender, RoutedEventArgs e)
+    {
+        var entry = NeMoModels.DiarizerEntry(_settings.DiarizerModelId);
+        DiarizerStatusText.Text = "Verifico…";
+        var (ok, message) = await ModelStore.VerifyAsync(entry);
+        DiarizerStatusText.Text = $"{entry.DisplayName}: {message}" + (ok ? string.Empty : " — riscaricalo da qui.");
+    }
+
+    private sealed record DiarizerOption(string Id, string Label);
+
+    // --- Barra fluttuante ---
+
+    private void LoadBarControls()
+    {
+        BarEnabledCheck.IsChecked = _settings.StartWithBar;
+        BarAnimationsCheck.IsChecked = _settings.BarAnimations;
+        BarDiscreetCheck.IsChecked = _settings.BarDiscreet;
+        BarRowsRow.Value = _settings.BarRows;
+        BarBufferRow.Value = _settings.BarBuffer;
+
+        BarTextBox.ItemsSource = new[] { "Originale e traduzione", "Solo originale", "Solo traduzione" };
+        BarTextBox.SelectedIndex = (int)_settings.BarText;
+        RefreshBarPreview();
+    }
+
+    private void OnBarChanged(object sender, EventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _settings.StartWithBar = BarEnabledCheck.IsChecked == true;
+        _settings.BarAnimations = BarAnimationsCheck.IsChecked == true;
+        _settings.BarDiscreet = BarDiscreetCheck.IsChecked == true;
+        _settings.BarRows = (int)Math.Round(BarRowsRow.Value);
+        _settings.BarBuffer = Math.Max((int)Math.Round(BarBufferRow.Value), _settings.BarRows);
+        _settings.BarText = (BarTextMode)Math.Clamp(BarTextBox.SelectedIndex, 0, 2);
+
+        RefreshBarPreview();
+        _onChanged();
+    }
+
+    private void RefreshBarPreview()
+    {
+        BarPreviewText.Text =
+            $"La barra mostra {_settings.BarRows} frasi per volta su {_settings.BarBuffer} in memoria: "
+            + $"le altre {Math.Max(0, _settings.BarBuffer - _settings.BarRows)} restano sotto, raggiungibili con la rotellina."
+            + (_settings.BarDiscreet ? " Modalità discreta attiva." : string.Empty);
+    }
 
     private void LoadControls()
     {
@@ -317,7 +468,7 @@ public partial class SettingsWindow : FluentWindow
             return;
         }
 
-        if (Tabs.SelectedIndex != 3 || TemplatesList.Items.Count == 0)
+        if (Tabs.SelectedIndex != SettingsTabs.Template || TemplatesList.Items.Count == 0)
         {
             return;
         }

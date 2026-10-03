@@ -82,6 +82,36 @@ public sealed class AppSettings
 
     public bool Translate { get; set; } = true;
 
+    /// <summary>Modalità conversazione: microfono "Tu" e audio di sistema con i nomi dei parlanti.</summary>
+    public bool ConversationMode { get; set; }
+
+    /// <summary>Diarizzatore scelto per la modalità conversazione (id di catalogo).</summary>
+    public string DiarizerModelId { get; set; } = Asr.NeMoModels.DiarizerDefaultId;
+
+    // --- Barra fluttuante ---
+
+    /// <summary>Cosa si apre all'avvio: barra fluttuante o pannello esteso.</summary>
+    public bool StartWithBar { get; set; } = true;
+
+    public double? BarLeft { get; set; }
+
+    public double? BarTop { get; set; }
+
+    /// <summary>Frasi visibili nella barra (1–3): le altre restano sotto, raggiungibili con la rotellina.</summary>
+    public int BarRows { get; set; } = 2;
+
+    /// <summary>Quante frasi tenere in memoria nella barra (3–8).</summary>
+    public int BarBuffer { get; set; } = 5;
+
+    /// <summary>Testo mostrato nella barra: entrambi, solo originale o solo traduzione.</summary>
+    public BarTextMode BarText { get; set; } = BarTextMode.Entrambi;
+
+    /// <summary>Modalità discreta: la barra lascia passare i clic tranne sulla maniglia.</summary>
+    public bool BarDiscreet { get; set; }
+
+    /// <summary>Riduce o disattiva le animazioni della barra.</summary>
+    public bool BarAnimations { get; set; } = true;
+
     /// <summary>Profilo prestazioni: Auto segue l'hardware rilevato, gli altri lo forzano.</summary>
     public PerformancePreset Preset { get; set; } = PerformancePreset.Auto;
 
@@ -159,9 +189,20 @@ public sealed class AppSettings
             Translate = Translate,
             SystemAudio = SystemAudio,
             Microphone = Microphone,
+            ConversationMode = ConversationMode,
+            DiarizerModelId = DiarizerModelId,
+            PerformancePreset = Preset,
             SystemDeviceId = SystemDeviceId,
             MicrophoneDeviceId = MicrophoneDeviceId,
             DiagnosticLog = DiagnosticLog,
         };
     }
+}
+
+/// <summary>Cosa mostra ogni riga della barra fluttuante.</summary>
+public enum BarTextMode
+{
+    Entrambi,
+    Originale,
+    Traduzione,
 }

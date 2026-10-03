@@ -18,17 +18,21 @@ public static class NeMoSpeechHost
 
     public static async Task<NeMoSpeechServer?> EnsureAsync(
         Action<string> report,
+        string? diarModelPath = null,
         CancellationToken cancellationToken = default)
     {
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_server is { StartedByUs: true } running
+                && string.Equals(running.DiarModelPath, diarModelPath, StringComparison.OrdinalIgnoreCase)
                 && await running.IsReadyAsync(cancellationToken).ConfigureAwait(false))
             {
                 return running;
             }
 
+            // La modalità conversazione richiede il diarizzatore: si riavvia il processo figlio
+            // solo quando serve davvero, non a ogni sessione.
             _server?.Dispose();
             _server = null;
 
@@ -47,7 +51,7 @@ public static class NeMoSpeechHost
                 .ConfigureAwait(false);
 
             report("Carico Nemotron 3.5 in memoria...");
-            var server = new NeMoSpeechServer(executable, model);
+            var server = new NeMoSpeechServer(executable, model, diarModelPath: diarModelPath);
             if (!await server.EnsureStartedAsync(TimeSpan.FromSeconds(120), cancellationToken).ConfigureAwait(false))
             {
                 server.Dispose();

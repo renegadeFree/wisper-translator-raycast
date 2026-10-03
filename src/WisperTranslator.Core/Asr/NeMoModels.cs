@@ -58,4 +58,35 @@ public static class NeMoModels
     }
 
     public static void Delete() => ModelStore.Delete(Entry);
+
+    /// <summary>Diarizzatore predefinito: 8 parlanti, 107 MB, licenza OpenMDW-1.1.</summary>
+    public const string DiarizerDefaultId = "nemotron-3-diarization";
+
+    public static IReadOnlyList<ModelCatalogEntry> Diarizers { get; } =
+        [ModelCatalog.NemotronDiarization, ModelCatalog.SortformerDiarization];
+
+    /// <summary>La voce di catalogo del diarizzatore scelto (il predefinito se l'id è ignoto).</summary>
+    public static ModelCatalogEntry DiarizerEntry(string? id) =>
+        Diarizers.FirstOrDefault(entry => string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? ModelCatalog.NemotronDiarization;
+
+    public static bool IsDiarizerInstalled(string? id) => ModelStore.IsInstalled(DiarizerEntry(id));
+
+    public static long DiarizerSize(string? id) => ModelStore.InstalledSize(DiarizerEntry(id));
+
+    /// <summary>Percorso del diarizzatore, solo se già installato (non fa partire download).</summary>
+    public static string? DiarizerPathIfInstalled(string? id)
+    {
+        var entry = DiarizerEntry(id);
+        var path = ModelStore.PathFor(entry);
+        return File.Exists(path) ? path : null;
+    }
+
+    public static Task<string> EnsureDiarizerAsync(
+        string? id,
+        IProgress<long>? progress = null,
+        CancellationToken cancellationToken = default) =>
+        ModelStore.EnsureAsync(DiarizerEntry(id), progress, cancellationToken);
+
+    public static void DeleteDiarizer(string? id) => ModelStore.Delete(DiarizerEntry(id));
 }

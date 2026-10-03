@@ -14,6 +14,8 @@ public static class AsrBackendFactory
         AsrModelSpec whisperFallback,
         string language,
         Action<string> report,
+        string? diarizerPath = null,
+        bool diarize = false,
         CancellationToken cancellationToken = default)
     {
         if (backend == AsrBackend.Vosk)
@@ -36,10 +38,12 @@ public static class AsrBackendFactory
         {
             try
             {
-                var server = await NeMoSpeechHost.EnsureAsync(report, cancellationToken).ConfigureAwait(false);
+                var server = await NeMoSpeechHost
+                    .EnsureAsync(report, diarizerPath, cancellationToken)
+                    .ConfigureAwait(false);
                 if (server is not null)
                 {
-                    return (new NeMoSpeechEngine(server, ownsServer: false), false);
+                    return (new NeMoSpeechEngine(server, ownsServer: false, diarize: diarize && diarizerPath is not null), false);
                 }
 
                 report("NeMo-Speech non disponibile: uso Whisper.");

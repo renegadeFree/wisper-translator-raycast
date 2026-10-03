@@ -14,17 +14,26 @@ public sealed class NeMoSpeechServer : IDisposable
 
     private readonly string _executablePath;
     private readonly string _modelPath;
+    private readonly string? _diarModelPath;
     private Process? _process;
     private bool _disposed;
 
-    public NeMoSpeechServer(string executablePath, string modelPath, int port = DefaultPort)
+    public NeMoSpeechServer(
+        string executablePath,
+        string modelPath,
+        int port = DefaultPort,
+        string? diarModelPath = null)
     {
         _executablePath = executablePath;
         _modelPath = modelPath;
+        _diarModelPath = diarModelPath;
         Port = port;
     }
 
     public int Port { get; }
+
+    /// <summary>Diarizzatore caricato in questo processo (null = nessuno).</summary>
+    public string? DiarModelPath => _diarModelPath;
 
     public bool StartedByUs => _process is { HasExited: false };
 
@@ -102,6 +111,16 @@ public sealed class NeMoSpeechServer : IDisposable
         startInfo.ArgumentList.Add(Port.ToString());
         startInfo.ArgumentList.Add("--no-ui");
         startInfo.ArgumentList.Add("--quiet");
+        if (!string.IsNullOrWhiteSpace(_diarModelPath) && File.Exists(_diarModelPath))
+        {
+            startInfo.ArgumentList.Add("--diar-model");
+            startInfo.ArgumentList.Add(_diarModelPath);
+
+            // Diarizziamo solo frasi già concluse: il preset offline è più preciso dello
+            // streaming e non costa latenza, perché nessuno sta aspettando quel risultato.
+            startInfo.ArgumentList.Add("--diar-preset");
+            startInfo.ArgumentList.Add("offline");
+        }
 
         var process = Process.Start(startInfo);
         if (process is null)

@@ -9,6 +9,7 @@ using WisperTranslator.Core.Hardware;
 using WisperTranslator.Core.History;
 using WisperTranslator.Core.Models;
 using WisperTranslator.Core.Rendering;
+using WisperTranslator.Core.Session;
 using WisperTranslator.Core.Settings;
 using WisperTranslator.Core.Templates;
 using WisperTranslator.Core.Translation;
@@ -43,6 +44,7 @@ internal static class Program
                 "vad-selftest" => await VadSelfTestAsync(),
                 "tts" => Tts(args[1..]),
                 "transcribe" => await TranscribeAsync(args[1..]),
+                "diarize" => await DiarizeAsync(args[1..]),
                 "bench" => await BenchAsync(args[1..]),
                 "live" => await LiveAsync(args[1..]),
                 "translate" => await TranslateAsync(args[1..]),
@@ -96,6 +98,7 @@ internal static class Program
               tts [opzioni]                genera una clip vocale di prova con le voci di Windows
                   --lang it|en             lingua della voce (default it)
                   --voice <nome>           voce SAPI da usare
+                  --voices "a,b,c"         alterna più voci frase per frase (prova dei parlanti)
                   --text "..."             testo da pronunciare (default: frase di prova)
                   --lines N                usa N frasi di prova in fila con una pausa fra loro
                   --pause MS               pausa fra le frasi in millisecondi (default 800)
@@ -727,6 +730,8 @@ internal static class Program
         var pauseMs = GetInt(args, "--pause", 800);
         var text = GetString(args, "--text", null)
                    ?? (language.StartsWith("en", StringComparison.Ordinal) ? EnglishSample : ItalianSample);
+        var voices = (GetString(args, "--voices", null) ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var output = GetString(args, "--out", null)
                      ?? Path.Combine(AppPaths.EnsureSubdirectory("test-clips"), $"clip-{language}.wav");
 
@@ -737,7 +742,12 @@ internal static class Program
                 : TranslationSamples.Italian;
             var sentences = pool.Take(Math.Min(lines, pool.Count)).ToList();
             text = string.Join(' ', sentences);
-            SpeechClips.WriteSentences(voice, sentences, output, pauseMs, language);
+            SpeechClips.WriteSentences(
+                voices.Length > 0 ? voices : [voice],
+                sentences,
+                output,
+                pauseMs,
+                language);
         }
         else
         {
@@ -752,6 +762,59 @@ internal static class Program
         Console.WriteLine($"Durata     : {samples.Length / 16000.0:F1} s");
         Console.WriteLine($"Testo      : {text}");
         return 0;
+    }
+
+    /// <summary>
+    /// Prova il percorso esatto dell'app: server NeMo con diarizzatore, stessa richiesta HTTP
+    /// dell'engine finale e stessa suddivisione in turni che usa la modalità conversazione.
+    /// </summary>
+    private static async Task<int> DiarizeAsync(string[] args)
+    {
+        var file = RequireFile(args);
+        var language = NormalizeLanguage(GetString(args, "--lang", "auto"));
+        var diarizerId = GetString(args, "--diarizer", NeMoModels.DiarizerDefaultId);
+        var samples = WavFile.ReadMono16k(file);
+
+        var diarizerPath = NeMoModels.DiarizerPathIfInstalled(diarizerId);
+        if (diarizerPath is null)
+        {
+            Console.WriteLine($"Diarizzatore non installato: lo scarico ({diarizerId})...");
+            diarizerPath = await NeMoModels.EnsureDiarizerAsync(
+                diarizerId,
+                new Progress<long>(done => Console.Write($"\r  {done / (1024.0 * 1024):F0} MB")));
+            Console.WriteLine();
+        }
+
+        var server = await NeMoSpeechHost.EnsureAsync(Console.WriteLine, diarizerPath);
+        if (server is null)
+        {
+            Console.Error.WriteLine("Server NeMo non disponibile.");
+            return 1;
+        }
+
+        try
+        {
+            using var engine = new NeMoSpeechEngine(server, ownsServer: false, diarize: true);
+            Console.WriteLine($"File    : {file} ({samples.Length / 16000.0:F1} s)");
+            var result = await engine.TranscribeAsync(samples, 16000, language, true);
+            Console.WriteLine($"Motore  : {engine.Name} · {result.Elapsed.TotalMilliseconds:F0} ms");
+            Console.WriteLine($"Testo   : {result.Text}");
+
+            var turns = RealtimeTranscriber.BuildTurns(result);
+            Console.WriteLine($"Turni   : {turns.Count}");
+            foreach (var turn in turns)
+            {
+                Console.WriteLine(
+                    $"  [{turn.Start.TotalSeconds,6:F2}s +{turn.Duration.TotalSeconds:F2}s] " +
+                    $"{Speakers.Label(turn.Speaker, "Partecipanti")}: {turn.Text}");
+            }
+
+            return turns.Count > 0 ? 0 : 2;
+        }
+        finally
+        {
+            NeMoSpeechHost.Shutdown();
+        }
     }
 
     private static async Task<int> TranscribeAsync(string[] args)

@@ -49,6 +49,18 @@ internal static class SpeechClips
         string outputPath,
         int pauseMs,
         string language)
+        => WriteSentences([voiceName], sentences, outputPath, pauseMs, language);
+
+    /// <summary>
+    /// Come sopra, ma alternando le voci frase per frase: serve a provare la diarizzazione
+    /// (due o più parlanti) senza registrare una call vera.
+    /// </summary>
+    public static void WriteSentences(
+        IReadOnlyList<string> voiceNames,
+        IReadOnlyList<string> sentences,
+        string outputPath,
+        int pauseMs,
+        string language)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
 
@@ -56,7 +68,10 @@ internal static class SpeechClips
         ssml.Append($"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"{language}\">");
         for (var index = 0; index < sentences.Count; index++)
         {
+            var voice = ResolveVoice(voiceNames[index % voiceNames.Count]);
+            ssml.Append($"<voice name=\"{voice}\">");
             ssml.Append(Escape(sentences[index]));
+            ssml.Append("</voice>");
             if (index < sentences.Count - 1)
             {
                 ssml.Append($"<break time=\"{pauseMs}ms\"/>");
@@ -66,7 +81,8 @@ internal static class SpeechClips
         ssml.Append("</speak>");
 
         using var synthesizer = new SpeechSynthesizer();
-        synthesizer.SelectVoice(ResolveVoice(voiceName));
+        // La voce è selezionata nell'SSML, ma il sintetizzatore ne vuole comunque una valida.
+        synthesizer.SelectVoice(ResolveVoice(voiceNames[0]));
         synthesizer.Rate = 0;
         synthesizer.SetOutputToWaveFile(
             outputPath,

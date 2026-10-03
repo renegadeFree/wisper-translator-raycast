@@ -16,6 +16,9 @@ public enum PdfSectionKind
 
     /// <summary>Trascrizione, con o senza originale e timecode.</summary>
     Transcript,
+
+    /// <summary>Elenco dei parlanti rilevati, calcolato in locale (nessuna chiamata all'IA).</summary>
+    Speakers,
 }
 
 public sealed record PdfSection(

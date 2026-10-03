@@ -46,6 +46,24 @@
                 <MenuItem Header="Esci" Icon="{ui:SymbolIcon Dismiss24}" Click="OnExitClicked" />
             </MenuItem>
 
+            <MenuItem Header="_Visuale">
+                <MenuItem x:Name="MenuBar" Header="Barra fluttuante" IsCheckable="True"
+                          Icon="{ui:SymbolIcon SlideMultiple24}" Click="OnMenuBarClicked" />
+                <MenuItem x:Name="MenuConversation" Header="Modalità conversazione (nomi dei parlanti)"
+                          IsCheckable="True" Icon="{ui:SymbolIcon People24}" Click="OnMenuConversationClicked" />
+                <MenuItem x:Name="MenuTranslate" Header="Traduci (se spento: solo trascrizione)"
+                          IsCheckable="True" Icon="{ui:SymbolIcon Translate24}" Click="OnMenuTranslateClicked" />
+                <Separator />
+                <MenuItem Header="Testo nella barra" Icon="{ui:SymbolIcon TextBulletList24}">
+                    <MenuItem x:Name="MenuBarBoth" Header="Originale e traduzione" IsCheckable="True"
+                              Click="OnBarTextBothClicked" />
+                    <MenuItem x:Name="MenuBarOriginal" Header="Solo originale" IsCheckable="True"
+                              Click="OnBarTextOriginalClicked" />
+                    <MenuItem x:Name="MenuBarTranslation" Header="Solo traduzione" IsCheckable="True"
+                              Click="OnBarTextTranslationClicked" />
+                </MenuItem>
+            </MenuItem>
+
             <MenuItem Header="_Strumenti">
                 <MenuItem x:Name="MenuOverlay" Header="Sottotitoli a schermo intero" IsCheckable="True"
                           Icon="{ui:SymbolIcon Subtitles24}" Click="OnOverlayClicked" />
@@ -81,6 +99,20 @@
                           Checked="OnMicrophoneToggled"
                           Unchecked="OnMicrophoneToggled"
                           ToolTip="Ingresso del microfono" />
+            <ToggleButton x:Name="ConversationToggle"
+                          Content="Conversazione"
+                          Padding="10,5"
+                          Margin="0,0,6,0"
+                          Checked="OnConversationToggled"
+                          Unchecked="OnConversationToggled"
+                          ToolTip="Separa le voci e dà un nome ai parlanti della call" />
+            <ToggleButton x:Name="TranslateToggle"
+                          Content="Traduci"
+                          Padding="10,5"
+                          Margin="0,0,6,0"
+                          Checked="OnTranslateToggled"
+                          Unchecked="OnTranslateToggled"
+                          ToolTip="Spento: trascrive soltanto, senza tradurre" />
             <ComboBox x:Name="DirectionBox"
                       Width="112"
                       Margin="0,0,6,0"
@@ -142,6 +174,12 @@
                                 </ContextMenu>
                             </Border.ContextMenu>
                             <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,1"
+                                            Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}">
+                                    <Ellipse Width="7" Height="7" VerticalAlignment="Center" Fill="{Binding SpeakerColor}" />
+                                    <TextBlock Text="{Binding SpeakerLabel}" Margin="5,0,0,0" FontSize="11"
+                                               FontWeight="SemiBold" Foreground="{Binding SpeakerColor}" />
+                                </StackPanel>
                                 <TextBlock Style="{StaticResource CueOriginalText}"
                                            FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource Scale}, ConverterParameter=0.8}"
                                            Text="{Binding Original}" />

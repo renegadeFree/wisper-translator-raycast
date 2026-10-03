@@ -37,6 +37,7 @@ public sealed class RealtimeOptions
 /// <summary>
 /// Testo pronto per la UI. <c>Text</c> è sempre il testo completo dell'enunciato in corso,
 /// non una differenza: <c>IsFinal</c> dice se è la versione definitiva (da sostituire in blocco).
+/// <c>Turns</c> è pieno solo quando la frase finale contiene più parlanti.
 /// </summary>
 public sealed record TranscriptUpdate(
     int UtteranceId,
@@ -45,7 +46,11 @@ public sealed record TranscriptUpdate(
     TimeSpan Start,
     TimeSpan Duration,
     TimeSpan Latency,
-    string Provisional = "");
+    string Provisional = "",
+    IReadOnlyList<TranscriptTurn>? Turns = null);
+
+/// <summary>Battuta di un singolo parlante dentro una frase finale diarizzata.</summary>
+public sealed record TranscriptTurn(int Speaker, string Text, TimeSpan Start, TimeSpan Duration);
 
 /// <summary>
 /// Lega sorgente audio, VAD e motore ASR in un flusso continuo: decodifiche parziali durante
@@ -342,7 +347,8 @@ public sealed class RealtimeTranscriber : IDisposable
                     true,
                     final.Start,
                     final.Duration,
-                    DateTime.UtcNow - closedAt));
+                    DateTime.UtcNow - closedAt,
+                    Turns: BuildTurns(result)));
                 SegmentClosed?.Invoke(final);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -362,6 +368,43 @@ public sealed class RealtimeTranscriber : IDisposable
         {
             // il ciclo esce al giro successivo
         }
+    }
+
+    /// <summary>
+    /// Turni per parlante, se il motore ha fatto diarizzazione. Senza parlanti la lista resta
+    /// vuota e la battuta viene trattata come sempre: nessun cambiamento per Whisper e Vosk.
+    /// </summary>
+    internal static IReadOnlyList<TranscriptTurn> BuildTurns(AsrResult result)
+    {
+        if (result.Segments.Count == 0 || !result.Segments.Any(segment => segment.Speaker != 0))
+        {
+            return [];
+        }
+
+        var turns = new List<TranscriptTurn>();
+        foreach (var segment in result.Segments)
+        {
+            var text = segment.Text.Trim();
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (turns.Count > 0 && turns[^1].Speaker == segment.Speaker)
+            {
+                var previous = turns[^1];
+                turns[^1] = previous with
+                {
+                    Text = $"{previous.Text} {text}",
+                    Duration = segment.Start + segment.Duration - previous.Start,
+                };
+                continue;
+            }
+
+            turns.Add(new TranscriptTurn(segment.Speaker, text, segment.Start, segment.Duration));
+        }
+
+        return turns;
     }
 
     public void Dispose()

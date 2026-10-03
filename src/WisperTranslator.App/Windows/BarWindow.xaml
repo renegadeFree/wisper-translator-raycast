@@ -1,0 +1,155 @@
+<ui:FluentWindow x:Class="WisperTranslator.App.Windows.BarWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Wisper Translator"
+                 Width="560"
+                 Height="170"
+                 MinWidth="380"
+                 WindowStyle="None"
+                 ResizeMode="NoResize"
+                 ShowInTaskbar="False"
+                 ShowActivated="False"
+                 WindowStartupLocation="Manual"
+                 WindowBackdropType="Acrylic"
+                 WindowCornerPreference="Round"
+                 ExtendsContentIntoTitleBar="True"
+                 Background="Transparent">
+    <Border x:Name="Shell"
+            CornerRadius="14"
+            BorderThickness="1"
+            Background="Transparent"
+            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            MouseLeftButtonDown="OnShellDrag">
+        <Grid Margin="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Velo semitrasparente: lascia passare l'acrilico di Windows mantenendo i colori del tema. -->
+            <Rectangle Grid.RowSpan="2" RadiusX="13" RadiusY="13"
+                       Fill="{DynamicResource ApplicationBackgroundBrush}" Opacity="0.78" />
+
+            <!-- Maniglia: si trascina da qui (e da tutta la superficie). -->
+            <Grid x:Name="HandleRow" Grid.Row="0" Height="42" Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <Ellipse x:Name="LiveDot" Width="9" Height="9" Fill="#8A8A8E" VerticalAlignment="Center">
+                        <Ellipse.RenderTransform>
+                            <ScaleTransform x:Name="LiveDotScale" CenterX="4.5" CenterY="4.5" />
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                    <TextBlock x:Name="TitleText" Text="Wisper" Margin="8,0,0,0" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <TextBlock x:Name="HandleStatus" Margin="8,0,0,0" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" MaxWidth="200"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" x:Name="SpeakerHintText" HorizontalAlignment="Right"
+                           Margin="0,0,10,0" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                <!-- Controlli: compaiono al passaggio del mouse. -->
+                <StackPanel x:Name="ControlsPanel" Grid.Column="2" Orientation="Horizontal"
+                            VerticalAlignment="Center" Margin="0,0,8,0" Opacity="0">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Window}}"
+                                             Value="True">
+                                    <DataTrigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1"
+                                                                 Duration="0:0:0.16" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </DataTrigger.EnterActions>
+                                    <DataTrigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0"
+                                                                 Duration="0:0:0.22" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </DataTrigger.ExitActions>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <ui:Button x:Name="PlayButton" Icon="{ui:SymbolIcon Play24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnStartStopClicked" ToolTip="Avvia o ferma" />
+                    <ui:Button x:Name="SystemButton" Icon="{ui:SymbolIcon Speaker024}" Appearance="Transparent"
+                               Padding="7,4" Click="OnSystemClicked" ToolTip="Audio di sistema" />
+                    <ui:Button x:Name="MicrophoneButton" Icon="{ui:SymbolIcon Mic24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnMicrophoneClicked" ToolTip="Microfono" />
+                    <ui:Button Icon="{ui:SymbolIcon ArrowSwap24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnSwapClicked" ToolTip="Inverti la direzione" />
+                    <ui:Button x:Name="TextModeButton" Icon="{ui:SymbolIcon TextBulletList24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnTextModeClicked" ToolTip="Testo mostrato" />
+                    <ui:Button x:Name="ConversationButton" Icon="{ui:SymbolIcon People24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnConversationClicked"
+                               ToolTip="Modalità conversazione: nomi dei parlanti" />
+                    <ui:Button x:Name="TranslateButton" Icon="{ui:SymbolIcon Translate24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnTranslateClicked" ToolTip="Traduci o solo trascrivi" />
+                    <ui:Button x:Name="DiscreetButton" Icon="{ui:SymbolIcon EyeOff24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnDiscreetClicked"
+                               ToolTip="Modalità discreta: lascia passare i clic" />
+                    <ui:Button Icon="{ui:SymbolIcon Subtitles24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnOverlayClicked" ToolTip="Sottotitoli a schermo intero" />
+                    <ui:Button Icon="{ui:SymbolIcon PanelRight24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnPanelClicked" ToolTip="Apri il pannello completo" />
+                    <ui:Button Icon="{ui:SymbolIcon Settings24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnSettingsClicked" ToolTip="Impostazioni" />
+                    <ui:Button Icon="{ui:SymbolIcon Dismiss24}" Appearance="Transparent"
+                               Padding="7,4" Click="OnHideClicked" ToolTip="Chiudi nella barra delle applicazioni" />
+                </StackPanel>
+            </Grid>
+
+            <ScrollViewer x:Name="Scroller" Grid.Row="1" Margin="6,0,6,6"
+                          VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"
+                          PanningMode="VerticalOnly">
+                <ItemsControl x:Name="CueList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="Row" Height="50" CornerRadius="10" Margin="0,0,0,4" Padding="10,5"
+                                    Background="#14FFFFFF">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Ellipse Width="8" Height="8" VerticalAlignment="Top" Margin="0,6,8,0"
+                                             Fill="{Binding Color}"
+                                             Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVisibility}}" />
+
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock FontSize="13" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{Binding HasOriginal, Converter={StaticResource BoolToVisibility}}">
+                                            <Run Text="{Binding SpeakerLabel, Mode=OneWay}" FontSize="11" FontWeight="SemiBold"
+                                                 Foreground="{Binding Color}" />
+                                            <Run Text="{Binding Original, Mode=OneWay}" />
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding Translation}" FontSize="15" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   Visibility="{Binding HasTranslation, Converter={StaticResource BoolToVisibility}}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</ui:FluentWindow>

@@ -123,6 +123,67 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="Conversazione">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,8,12,8">
+                    <StackPanel>
+                        <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="Nelle riunioni e nelle call: il microfono resta &quot;Tu&quot;, l'audio di sistema viene diviso per parlante. La diarizzazione lavora solo sulle frasi definitive, quindi il testo immediato resta veloce come prima." />
+
+                        <CheckBox x:Name="ConversationCheck" Content="Attiva la modalità conversazione"
+                                  Click="OnConversationChanged" />
+
+                        <TextBlock Text="Diarizzatore" Margin="0,14,0,4" />
+                        <ComboBox x:Name="DiarizerBox" DisplayMemberPath="Label" SelectionChanged="OnDiarizerChanged" />
+                        <TextBlock x:Name="DiarizerHint" Margin="0,6,0,0" TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <ui:Button x:Name="DiarizerDownloadButton" Content="Scarica il diarizzatore"
+                                       Icon="{ui:SymbolIcon ArrowDownload24}" Padding="12,5"
+                                       Click="OnDownloadDiarizerClicked" />
+                            <Button Content="Verifica" Padding="10,4" Margin="8,0,0,0" Click="OnVerifyDiarizerClicked" />
+                        </StackPanel>
+                        <ProgressBar x:Name="DiarizerProgress" Height="6" Margin="0,10,0,0" Visibility="Collapsed" />
+                        <TextBlock x:Name="DiarizerStatusText" Margin="0,6,0,0" TextWrapping="Wrap" />
+
+                        <Separator Margin="0,16,0,12" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="Limiti dichiarati: le voci sovrapposte o molto simili possono essere confuse, le etichette vanno da Speaker 1 a Speaker 8, e i nomi non vengono ricordati tra una sessione e l'altra. Su PC con poca memoria la diarizzazione resta spenta finché non la si scarica qui." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Barra">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,8,12,8">
+                    <StackPanel>
+                        <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="La barra fluttuante sta sopra le altre finestre, si trascina ovunque e si aggancia ai bordi. Le frasi oltre quelle visibili restano sotto: si raggiungono con la rotellina del mouse mentre il puntatore è sulla barra." />
+
+                        <CheckBox x:Name="BarEnabledCheck" Content="Apri la barra all'avvio" Click="OnBarChanged" />
+                        <CheckBox x:Name="BarAnimationsCheck" Content="Animazioni (comparsa, respiro, scorrimento)"
+                                  Margin="0,8,0,0" Click="OnBarChanged" />
+                        <CheckBox x:Name="BarDiscreetCheck" Content="Modalità discreta: lascia passare i clic (maniglia esclusa)"
+                                  Margin="0,8,0,0" Click="OnBarChanged" />
+
+                        <TextBlock Text="Testo mostrato" Margin="0,14,0,4" />
+                        <ComboBox x:Name="BarTextBox" SelectionChanged="OnBarChanged" />
+
+                        <controls:SliderRow x:Name="BarRowsRow" Label="Frasi visibili" Margin="0,14,0,0"
+                                            Minimum="1" Maximum="3" TickFrequency="1"
+                                            ValueFormat="{}{0:0}" ValueChanged="OnBarChanged" />
+                        <controls:SliderRow x:Name="BarBufferRow" Label="Frasi in memoria" Margin="0,12,0,0"
+                                            Minimum="3" Maximum="8" TickFrequency="1"
+                                            ValueFormat="{}{0:0}" ValueChanged="OnBarChanged" />
+
+                        <TextBlock x:Name="BarPreviewText" Margin="0,14,0,0" TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="Modelli">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,8,12,8">
                     <StackPanel>

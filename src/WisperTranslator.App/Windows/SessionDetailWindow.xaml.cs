@@ -44,6 +44,9 @@ public partial class SessionDetailWindow : FluentWindow
             .Select(cue => new
             {
                 Header = $"[{cue.AudioStart:mm\\:ss}]",
+                Speaker = cue.HasSpeaker ? cue.SpeakerLabel : string.Empty,
+                SpeakerColor = cue.SpeakerColor,
+                HasSpeaker = cue.HasSpeaker,
                 cue.Original,
                 cue.Translation,
             })
@@ -179,9 +182,15 @@ public partial class SessionDetailWindow : FluentWindow
 
     private string Transcript => string.Join(
         Environment.NewLine,
-        _cues.Select(cue => cue.Translation.Trim().Length > 0
-            ? $"{cue.Original}{Environment.NewLine}{cue.Translation}"
-            : cue.Original));
+        _cues.Select(cue =>
+        {
+            // Il nome del parlante entra nel testo dato all'IA: così i riassunti distinguono chi
+            // ha detto cosa senza inventare ruoli.
+            var who = cue.HasSpeaker ? $"{cue.SpeakerLabel}: " : string.Empty;
+            return cue.Translation.Trim().Length > 0
+                ? $"{who}{cue.Original}{Environment.NewLine}{cue.Translation}"
+                : who + cue.Original;
+        }));
 
     private async void OnSummaryClicked(object sender, RoutedEventArgs e) =>
         await RunAiAsync(AiTask.ShortSummary, text => SummaryText.Text = text, "Riassunto");

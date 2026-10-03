@@ -1,6 +1,9 @@
 namespace WisperTranslator.Core.Asr;
 
-public sealed record AsrSegment(string Text, TimeSpan Start, TimeSpan Duration);
+/// <summary>
+/// Pezzo di trascrizione con i tempi. <c>Speaker</c> è 0 quando il motore non fa diarizzazione.
+/// </summary>
+public sealed record AsrSegment(string Text, TimeSpan Start, TimeSpan Duration, int Speaker = 0);
 
 public sealed record AsrResult(
     string Text,

@@ -64,7 +64,8 @@ public partial class App : Application
         if (e.Args.Contains("--settings", StringComparer.OrdinalIgnoreCase)
             || e.Args.Any(arg => arg.StartsWith("--settings=", StringComparison.OrdinalIgnoreCase)))
         {
-            // --settings=3 apre direttamente la scheda Template (utile per supporto e screenshot).
+            // --settings=<n> apre direttamente una scheda (utile per supporto e screenshot):
+            // 0 Aspetto, 1 Prestazioni, 2 Conversazione, 3 Barra, 4 Modelli, 5 Template, 6 Storico, 7 IA.
             var index = 0;
             var inline = e.Args.FirstOrDefault(arg => arg.StartsWith("--settings=", StringComparison.OrdinalIgnoreCase));
             if (inline is not null && int.TryParse(inline["--settings=".Length..], out var parsed))

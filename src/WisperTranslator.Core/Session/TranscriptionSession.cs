@@ -26,17 +26,32 @@ public sealed class TranscriptionSession : IAsyncDisposable
     private AudioMixer? _mixer;
     private VoiceCapture? _systemCapture;
     private VoiceCapture? _microphoneCapture;
-    private SpeechSegmenter? _segmenter;
     private IAsrEngine? _partialEngine;
     private IAsrEngine? _finalEngine;
     private bool _ownsPartialEngine;
     private bool _ownsFinalEngine;
-    private RealtimeTranscriber? _transcriber;
+    private readonly List<VoiceCapture> _captures = [];
+    private readonly List<Lane> _lanes = [];
+
+    /// <summary>
+    /// Corsia → battuta. Con più sorgenti gli enunciati di ognuna partono da 1: senza questa
+    /// mappa le due corsie si sovrascriverebbero a vicenda.
+    /// </summary>
+    private readonly Dictionary<(int Lane, int Utterance), int> _cueIds = [];
+
+    private int _nextCueId;
     private TranslationServer? _translationServer;
     private TranslationService? _translationService;
     private CancellationTokenSource? _cancellation;
     private Task? _pipeline;
     private bool _disposed;
+
+    /// <summary>Una corsia: VAD e trascrittore indipendenti su una sola sorgente audio.</summary>
+    private sealed record Lane(int Index, int Speaker, SpeechSegmenter Segmenter, RealtimeTranscriber Transcriber)
+    {
+        /// <summary>Il parlante è noto a priori (il microfono è sempre "Tu").</summary>
+        public bool SpeakerIsFixed => Speaker != Speakers.Unknown;
+    }
 
     /// <summary>Attesa prima di tradurre un parziale: evita di tradurre ogni singola parola.</summary>
     private static readonly TimeSpan ProgressiveTranslationDelay = TimeSpan.FromMilliseconds(300);
@@ -85,6 +100,10 @@ public sealed class TranscriptionSession : IAsyncDisposable
         Report("Preparo il rilevatore di voce...");
         await ModelStore.EnsureVadModelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
+        var diarizerPath = Options.ConversationMode
+            ? await PrepareDiarizerAsync(Report, cancellationToken).ConfigureAwait(false)
+            : null;
+
         Report("Preparo il riconoscitore istantaneo...");
         var partial = await AsrBackendFactory
             .CreateAsync(
@@ -92,6 +111,8 @@ public sealed class TranscriptionSession : IAsyncDisposable
                 Options.PartialModel,
                 Options.SourceLanguage,
                 Report,
+                diarizerPath,
+                diarize: false,
                 cancellationToken)
             .ConfigureAwait(false);
         _partialEngine = partial.Engine;
@@ -104,10 +125,17 @@ public sealed class TranscriptionSession : IAsyncDisposable
                 Options.FinalModel,
                 Options.SourceLanguage,
                 Report,
+                diarizerPath,
+                diarize: diarizerPath is not null,
                 cancellationToken)
             .ConfigureAwait(false);
         _finalEngine = final.Engine;
         _ownsFinalEngine = final.Owned;
+
+        if (Options.ConversationMode && diarizerPath is null)
+        {
+            Report("Conversazione senza diarizzazione: le battute restano senza nome del parlante.");
+        }
 
         if (Options.Translate)
         {
@@ -116,12 +144,52 @@ public sealed class TranscriptionSession : IAsyncDisposable
         }
 
         Report("Apro le sorgenti audio...");
+        _cueIds.Clear();
+        _nextCueId = 0;
         BuildPipeline();
 
         StartHistory();
         _cancellation = new CancellationTokenSource();
-        _pipeline = Task.Run(() => _transcriber!.RunAsync(_cancellation.Token), CancellationToken.None);
+        _pipeline = Task.WhenAll(_lanes.Select(lane => lane.Transcriber.RunAsync(_cancellation.Token)));
         Report("In ascolto");
+    }
+
+    /// <summary>
+    /// Il diarizzatore serve solo in modalità conversazione. Si scarica da solo una volta, ma
+    /// non sulle macchine minime: lì resta spento finché non lo si scarica a mano.
+    /// </summary>
+    private async Task<string?> PrepareDiarizerAsync(Action<string> report, CancellationToken cancellationToken)
+    {
+        if (Options.FinalBackend != Hardware.AsrBackend.NeMoSpeech)
+        {
+            report("La diarizzazione richiede il motore definitivo NeMo: la salto.");
+            return null;
+        }
+
+        if (NeMoModels.DiarizerPathIfInstalled(Options.DiarizerModelId) is { } installed)
+        {
+            return installed;
+        }
+
+        if (Options.PerformancePreset == Hardware.PerformancePreset.Reattivo)
+        {
+            report("PC minimo: diarizzazione spenta. Si attiva scaricando il diarizzatore dalle impostazioni.");
+            return null;
+        }
+
+        try
+        {
+            var entry = NeMoModels.DiarizerEntry(Options.DiarizerModelId);
+            report($"Scarico il diarizzatore {entry.DisplayName} (una volta sola)...");
+            return await NeMoModels.EnsureDiarizerAsync(Options.DiarizerModelId, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            LastError = exception.Message;
+            report($"Diarizzatore non disponibile ({exception.Message}): continuo senza nomi dei parlanti.");
+            return null;
+        }
     }
 
     private void StartHistory()
@@ -161,6 +229,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
             audioDuration = Math.Round(cue.Duration.TotalSeconds, 2),
             latencyMs = (int)latency.TotalMilliseconds,
             chars = textLength,
+            speaker = cue.Speaker,
             text = cue.Original,
         });
 
@@ -199,70 +268,172 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
     private void BuildPipeline()
     {
-        _mixer = new AudioMixer();
+        var sources = new List<(IPcmSource Source, VoiceCapture? Capture, int Speaker)>();
 
         if (Options.SystemAudio)
         {
             _systemCapture = new VoiceCapture(SourceKind.System, Options.SystemDeviceId);
-            _mixer.Add(_systemCapture);
+            _captures.Add(_systemCapture);
+            sources.Add((_systemCapture, _systemCapture, Speakers.Unknown));
         }
 
         if (Options.Microphone)
         {
             _microphoneCapture = new VoiceCapture(SourceKind.Microphone, Options.MicrophoneDeviceId);
-            _mixer.Add(_microphoneCapture);
+            _captures.Add(_microphoneCapture);
+            sources.Add((
+                _microphoneCapture,
+                _microphoneCapture,
+                Options.ConversationMode ? Speakers.You : Speakers.Unknown));
         }
 
-        if (_mixer.Sources.Count == 0)
+        if (sources.Count == 0)
         {
             throw new InvalidOperationException("Nessuna sorgente audio selezionata.");
         }
 
-        var vad = new SileroVad(AppPaths.VadModelPath);
-        _segmenter = new SpeechSegmenter(vad);
-        _transcriber = new RealtimeTranscriber(
-            _mixer,
-            _segmenter,
-            _partialEngine!,
-            null,
-            _finalEngine!)
+        if (Options.ConversationMode)
         {
-            Language = Options.SourceLanguage,
-        };
-
-        _transcriber.Update += OnTranscriptUpdate;
-
-        foreach (var source in _mixer.Sources.OfType<VoiceCapture>())
+            // Una corsia per sorgente: il VAD di ognuna chiude le frasi per conto proprio.
+            foreach (var (source, _, speaker) in sources)
+            {
+                AddLane(source, speaker);
+            }
+        }
+        else
         {
-            source.Start();
+            _mixer = new AudioMixer();
+            foreach (var (_, capture, _) in sources)
+            {
+                _mixer.Add(capture!);
+            }
+
+            AddLane(_mixer, Speakers.Unknown);
+        }
+
+        foreach (var capture in _captures)
+        {
+            capture.Start();
         }
     }
 
-    private void OnTranscriptUpdate(TranscriptUpdate update)
+    private void AddLane(IPcmSource source, int speaker)
+    {
+        var segmenter = new SpeechSegmenter(new SileroVad(AppPaths.VadModelPath));
+        var lane = new Lane(
+            _lanes.Count,
+            speaker,
+            segmenter,
+            new RealtimeTranscriber(source, segmenter, _partialEngine!, null, _finalEngine!)
+            {
+                Language = Options.SourceLanguage,
+            });
+
+        lane.Transcriber.Update += update => OnTranscriptUpdate(lane, update);
+        _lanes.Add(lane);
+    }
+
+    private void OnTranscriptUpdate(Lane lane, TranscriptUpdate update)
+    {
+        var turns = !lane.SpeakerIsFixed && update.IsFinal ? update.Turns : null;
+        if (turns is { Count: > 1 })
+        {
+            // Nella stessa frase si sono sentite più voci: la battuta in corso diventa il primo
+            // turno e gli altri si accodano, senza far saltare l'elenco.
+            for (var i = 0; i < turns.Count; i++)
+            {
+                var turn = turns[i];
+                var cueId = i == 0
+                    ? ResolveCueId(lane.Index, update.UtteranceId)
+                    : NextCueId();
+                PublishCue(
+                    cueId,
+                    turn.Speaker,
+                    turn.Text,
+                    isFinal: true,
+                    turn.Start,
+                    turn.Duration,
+                    provisional: string.Empty,
+                    update.Latency);
+            }
+
+            return;
+        }
+
+        var speaker = lane.SpeakerIsFixed
+            ? lane.Speaker
+            : turns is { Count: 1 } single ? single[0].Speaker : Speakers.Unknown;
+        PublishCue(
+            ResolveCueId(lane.Index, update.UtteranceId),
+            speaker,
+            update.Text,
+            update.IsFinal,
+            update.Start,
+            update.Duration,
+            update.Provisional,
+            update.Latency);
+    }
+
+    /// <summary>Id stabile per la coppia corsia+enunciato: parziali e finale restano la stessa riga.</summary>
+    private int ResolveCueId(int lane, int utterance)
+    {
+        lock (_cueGate)
+        {
+            if (_cueIds.TryGetValue((lane, utterance), out var existing))
+            {
+                return existing;
+            }
+
+            var created = NextCueIdLocked();
+            _cueIds[(lane, utterance)] = created;
+            return created;
+        }
+    }
+
+    private int NextCueId()
+    {
+        lock (_cueGate)
+        {
+            return NextCueIdLocked();
+        }
+    }
+
+    private int NextCueIdLocked() => ++_nextCueId;
+
+    private void PublishCue(
+        int cueId,
+        int speaker,
+        string text,
+        bool isFinal,
+        TimeSpan start,
+        TimeSpan duration,
+        string provisional,
+        TimeSpan latency)
     {
         Cue cue;
         lock (_cueGate)
         {
-            var translation = _cues.TryGetValue(update.UtteranceId, out var previous) ? previous.Translation : string.Empty;
+            var translation = _cues.TryGetValue(cueId, out var previous) ? previous.Translation : string.Empty;
             cue = new Cue(
-                update.UtteranceId,
-                update.Text,
+                cueId,
+                text,
                 translation,
-                update.IsFinal,
-                update.Start,
-                update.Duration,
+                isFinal,
+                start,
+                duration,
                 previous?.CreatedAt ?? DateTime.Now,
-                update.Provisional);
-            _cues[update.UtteranceId] = cue;
-            if (update.IsFinal)
+                provisional,
+                speaker);
+            _cues[cueId] = cue;
+            if (isFinal)
             {
                 Transcribed++;
             }
         }
 
         CueUpdated?.Invoke(cue);
-        WriteDiagnostic(cue, update.Latency, cue.Original.Length);
-        if (update.IsFinal)
+        WriteDiagnostic(cue, latency, cue.Original.Length);
+        if (isFinal)
         {
             CueCompleted?.Invoke(cue);
         }
@@ -281,7 +452,7 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         if (Options.Translate && _translationService is not null && cue.Original.Length > 1)
         {
-            ScheduleTranslation(cue, update.IsFinal);
+            ScheduleTranslation(cue, isFinal);
         }
     }
 
@@ -367,15 +538,9 @@ public sealed class TranscriptionSession : IAsyncDisposable
     /// <summary>Livelli audio correnti delle sorgenti: la UI li usa come spia di funzionamento.</summary>
     public IReadOnlyList<(string Name, float Level, bool Enabled)> Levels()
     {
-        if (_mixer is null)
-        {
-            return [];
-        }
-
         return
         [
-            .. _mixer.Sources
-                .OfType<VoiceCapture>()
+            .. _captures
                 .Select(capture => (capture.Name, capture.Level, capture.Enabled)),
         ];
     }
@@ -393,9 +558,9 @@ public sealed class TranscriptionSession : IAsyncDisposable
     {
         Options.SourceLanguage = sourceLanguage;
         Options.TargetLanguage = targetLanguage;
-        if (_transcriber is not null)
+        foreach (var lane in _lanes)
         {
-            _transcriber.Language = sourceLanguage;
+            lane.Transcriber.Language = sourceLanguage;
         }
 
         if (_translationService is not null)
@@ -454,11 +619,13 @@ public sealed class TranscriptionSession : IAsyncDisposable
 
         Safe(() =>
         {
-            if (_transcriber is not null)
+            foreach (var lane in _lanes)
             {
-                _transcriber.Update -= OnTranscriptUpdate;
-                _transcriber.Dispose();
+                lane.Transcriber.Dispose();
+                lane.Segmenter.Dispose();
             }
+
+            _lanes.Clear();
         });
 
         // Whisper appartiene al pool e resta caldo; Vosk/NeMo sono nostri e si liberano qui.
@@ -477,7 +644,16 @@ public sealed class TranscriptionSession : IAsyncDisposable
             }
         });
 
-        Safe(() => _segmenter?.Dispose());
+        // Le sorgenti del mixer appartengono al mixer; in modalità conversazione no.
+        Safe(() =>
+        {
+            foreach (var capture in _captures.Where(capture => _mixer is null || !_mixer.Sources.Contains(capture)))
+            {
+                capture.Dispose();
+            }
+
+            _captures.Clear();
+        });
         Safe(() => _mixer?.Dispose());
         Safe(() => _translationService?.Dispose());
         Safe(() => _translationServer?.Dispose());

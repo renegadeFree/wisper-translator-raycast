@@ -18,6 +18,9 @@ public sealed class SessionOptions
     /// <summary>Corsia della frase definitiva.</summary>
     public AsrBackend FinalBackend { get; set; } = AsrBackend.WhisperCpu;
 
+    /// <summary>Profilo scelto: decide cosa si può scaricare da soli senza appesantire la macchina.</summary>
+    public PerformancePreset PerformancePreset { get; set; } = PerformancePreset.Auto;
+
     public string SourceLanguage { get; set; } = "it";
 
     public string TargetLanguage { get; set; } = "en";
@@ -27,6 +30,15 @@ public sealed class SessionOptions
     public bool SystemAudio { get; set; } = true;
 
     public bool Microphone { get; set; }
+
+    /// <summary>
+    /// Modalità conversazione: ogni sorgente ha la sua corsia, il microfono è "Tu" e l'audio di
+    /// sistema viene diarizzato per dare un'etichetta a chi parla nella call.
+    /// </summary>
+    public bool ConversationMode { get; set; }
+
+    /// <summary>Diarizzatore scelto (id di catalogo, vedi <see cref="Asr.NeMoModels.Diarizers"/>).</summary>
+    public string DiarizerModelId { get; set; } = Asr.NeMoModels.DiarizerDefaultId;
 
     public string? SystemDeviceId { get; set; }
 

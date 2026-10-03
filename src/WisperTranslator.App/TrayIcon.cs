@@ -17,6 +17,7 @@ internal sealed class TrayIcon : IDisposable
     private readonly ToolStripMenuItem _itToEnItem = new("Italiano → Inglese") { CheckOnClick = false };
     private readonly ToolStripMenuItem _enToItItem = new("Inglese → Italiano") { CheckOnClick = false };
     private readonly ToolStripMenuItem _overlayItem = new("Sottotitoli a schermo intero") { CheckOnClick = false };
+    private readonly ToolStripMenuItem _barItem = new("Barra fluttuante") { CheckOnClick = false };
     private bool _disposed;
 
     public TrayIcon()
@@ -30,6 +31,7 @@ internal sealed class TrayIcon : IDisposable
         _itToEnItem.Click += (_, _) => DirectionChangeRequested?.Invoke("it");
         _enToItItem.Click += (_, _) => DirectionChangeRequested?.Invoke("en");
         _overlayItem.Click += (_, _) => OverlayToggleRequested?.Invoke();
+        _barItem.Click += (_, _) => BarToggleRequested?.Invoke();
 
         var sources = new ToolStripMenuItem("Sorgenti", null, _systemItem, _microphoneItem);
         var direction = new ToolStripMenuItem("Direzione", null, _itToEnItem, _enToItItem);
@@ -44,6 +46,7 @@ internal sealed class TrayIcon : IDisposable
             new ToolStripSeparator(),
             sources,
             direction,
+            _barItem,
             _overlayItem,
             new ToolStripSeparator(),
             sessions,
@@ -76,6 +79,8 @@ internal sealed class TrayIcon : IDisposable
 
     public event Action? OverlayToggleRequested;
 
+    public event Action? BarToggleRequested;
+
     public event Action? HistoryRequested;
 
     public event Action? ModelsRequested;
@@ -94,6 +99,7 @@ internal sealed class TrayIcon : IDisposable
         bool systemAudio,
         bool microphone,
         bool overlay,
+        bool bar,
         string sourceLanguage,
         string status)
     {
@@ -104,6 +110,7 @@ internal sealed class TrayIcon : IDisposable
         _itToEnItem.Checked = sourceLanguage == "it";
         _enToItItem.Checked = sourceLanguage != "it";
         _overlayItem.Checked = overlay;
+        _barItem.Checked = bar;
 
         var text = $"Wisper Translator — {status}";
         _notifyIcon.Text = text.Length <= 63 ? text : text[..60] + "…";

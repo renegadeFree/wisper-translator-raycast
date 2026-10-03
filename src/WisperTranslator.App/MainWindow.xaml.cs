@@ -30,6 +30,7 @@ public partial class MainWindow : FluentWindow
     private readonly ObservableCollection<Cue> _cues = [];
     private TranscriptionSession? _session;
     private OverlayWindow? _overlay;
+    private BarWindow? _bar;
     private SettingsWindow? _settingsWindow;
     private TrayIcon? _tray;
     private HwndSource? _source;
@@ -47,6 +48,8 @@ public partial class MainWindow : FluentWindow
         DirectionBox.SelectedIndex = _settings.SourceLanguage == "it" ? 0 : 1;
         SystemToggle.IsChecked = _settings.SystemAudio;
         MicrophoneToggle.IsChecked = _settings.Microphone;
+        ConversationToggle.IsChecked = _settings.ConversationMode;
+        TranslateToggle.IsChecked = _settings.Translate;
         Topmost = _settings.Topmost;
         FontSize = _settings.FontSize;
         Opacity = _settings.Opacity;
@@ -61,6 +64,9 @@ public partial class MainWindow : FluentWindow
     internal AppSettings Settings => _settings;
 
     internal IReadOnlyList<Cue> Cues => _cues;
+
+    /// <summary>Vero quando la barra fluttuante è a schermo.</summary>
+    internal bool IsBarVisible => _bar is { IsVisible: true };
 
     private void RestorePlacement()
     {
@@ -92,9 +98,22 @@ public partial class MainWindow : FluentWindow
             }
         });
         _tray.OverlayToggleRequested += () => Dispatcher.Invoke(ToggleOverlay);
-        _tray.HistoryRequested += () => Dispatcher.Invoke(() => OpenSettings(4));
-        _tray.ModelsRequested += () => Dispatcher.Invoke(() => OpenSettings(2));
-        _tray.SettingsRequested += () => Dispatcher.Invoke(() => OpenSettings(0));
+        _tray.BarToggleRequested += () => Dispatcher.Invoke(() =>
+        {
+            if (_bar is { IsVisible: true })
+            {
+                HideBar();
+            }
+            else
+            {
+                ShowBar();
+            }
+
+            SyncMenus();
+        });
+        _tray.HistoryRequested += () => Dispatcher.Invoke(() => OpenSettings(SettingsTabs.Storico));
+        _tray.ModelsRequested += () => Dispatcher.Invoke(() => OpenSettings(SettingsTabs.Modelli));
+        _tray.SettingsRequested += () => Dispatcher.Invoke(() => OpenSettings(SettingsTabs.Aspetto));
         _tray.OpenDataFolderRequested += OpenDataFolder;
         _tray.AboutRequested += ShowAbout;
         _tray.ExitRequested += ExitApplication;
@@ -119,6 +138,11 @@ public partial class MainWindow : FluentWindow
         if (_settings.OverlayEnabled)
         {
             ShowOverlay();
+        }
+
+        if (_settings.StartWithBar)
+        {
+            ShowBar();
         }
 
         if (_settings.RetentionDays > 0)
@@ -387,7 +411,119 @@ public partial class MainWindow : FluentWindow
             }
 
             _overlay?.Refresh();
+            RefreshBar();
         });
+    }
+
+    // --- Barra fluttuante ---
+
+    private void ShowBar()
+    {
+        if (_bar is null)
+        {
+            try
+            {
+                _bar = new BarWindow(_settings);
+            }
+            catch (Exception exception)
+            {
+                // Un errore di XAML non deve sparire nel nulla: senza questo la barra
+                // semplicemente non comparirebbe e sembrerebbe un problema di impostazioni.
+                SetStatus($"Barra non disponibile: {exception.Message}");
+                return;
+            }
+
+            _bar.StartStopRequested += () => _ = ToggleSessionAsync();
+            _bar.SystemRequested += () => SystemToggle.IsChecked = SystemToggle.IsChecked != true;
+            _bar.MicrophoneRequested += () => MicrophoneToggle.IsChecked = MicrophoneToggle.IsChecked != true;
+            _bar.SwapRequested += () => DirectionBox.SelectedIndex = DirectionBox.SelectedIndex == 0 ? 1 : 0;
+            _bar.TextModeRequested += CycleBarText;
+            _bar.ConversationRequested += () => ConversationToggle.IsChecked = ConversationToggle.IsChecked != true;
+            _bar.TranslateRequested += () => TranslateToggle.IsChecked = TranslateToggle.IsChecked != true;
+            _bar.DiscreetRequested += ToggleDiscreet;
+            _bar.OverlayRequested += ToggleOverlay;
+            _bar.PanelRequested += () =>
+            {
+                Show();
+                Activate();
+            };
+            _bar.SettingsRequested += () => OpenSettings(SettingsTabs.Aspetto);
+            _bar.HideRequested += () => _bar?.Hide();
+            _bar.Closed += (_, _) => _bar = null;
+        }
+
+        _bar.Show();
+        RefreshBar();
+        _settings.Save();
+    }
+
+    private void HideBar()
+    {
+        _bar?.Hide();
+        _settings.Save();
+    }
+
+    /// <summary>Passa i dati alla barra: frasi e stato dei controlli in un colpo solo.</summary>
+    private void RefreshBar()
+    {
+        if (_bar is null)
+        {
+            return;
+        }
+
+        var running = _session is { IsRunning: true };
+        _bar.Sync(
+            _cues,
+            new BarState(
+                running,
+                SystemToggle.IsChecked == true,
+                MicrophoneToggle.IsChecked == true,
+                _overlay is { IsVisible: true },
+                ConversationToggle.IsChecked == true,
+                DirectionBox.SelectedIndex == 0 ? "it" : "en",
+                StatusText.Text,
+                SpeakerHint()));
+    }
+
+    /// <summary>Quante voci si sono sentite: è l'informazione che si vuole avere sotto mano.</summary>
+    private string SpeakerHint()
+    {
+        if (ConversationToggle.IsChecked != true)
+        {
+            return string.Empty;
+        }
+
+        var speakers = _cues.Select(cue => cue.Speaker).Where(speaker => speaker != Speakers.Unknown).Distinct().Count();
+        return speakers switch
+        {
+            0 => "una voce",
+            1 => "1 voce",
+            _ => $"{speakers} voci",
+        };
+    }
+
+    private void CycleBarText()
+    {
+        _settings.BarText = _settings.BarText switch
+        {
+            BarTextMode.Entrambi => BarTextMode.Traduzione,
+            BarTextMode.Traduzione => BarTextMode.Originale,
+            _ => BarTextMode.Entrambi,
+        };
+
+        _settings.Save();
+        SyncMenus();
+        RefreshBar();
+    }
+
+    private void ToggleDiscreet()
+    {
+        _settings.BarDiscreet = !_settings.BarDiscreet;
+        _settings.Save();
+        RefreshBar();
+        SetStatus(_settings.BarDiscreet
+            ? "Modalità discreta: la barra lascia passare i clic (maniglia esclusa)."
+            : "Modalità normale: la barra accetta i clic.");
     }
 
     private void OnSystemToggled(object sender, RoutedEventArgs e)
@@ -404,6 +540,69 @@ public partial class MainWindow : FluentWindow
         _session?.SetMicrophone(_settings.Microphone);
         SyncMenus();
         UpdateTray(StatusText.Text);
+        RefreshBar();
+    }
+
+    private void OnConversationToggled(object sender, RoutedEventArgs e)
+    {
+        var enabled = ConversationToggle.IsChecked == true;
+        if (enabled && _session is { IsRunning: true })
+        {
+            SetStatus("Modalità conversazione: si applica alla prossima sessione.");
+        }
+
+        _settings.ConversationMode = enabled;
+        _settings.Save();
+        SyncMenus();
+        UpdateTray(StatusText.Text);
+        RefreshBar();
+    }
+
+    private void OnTranslateToggled(object sender, RoutedEventArgs e)
+    {
+        _settings.Translate = TranslateToggle.IsChecked == true;
+        if (_session is { IsRunning: true })
+        {
+            SetStatus("Traduzione: si applica alla prossima sessione.");
+        }
+
+        _settings.Save();
+        SyncMenus();
+        RefreshBar();
+    }
+
+    private void OnMenuBarClicked(object sender, RoutedEventArgs e)
+    {
+        if (MenuBar.IsChecked)
+        {
+            ShowBar();
+        }
+        else
+        {
+            HideBar();
+        }
+
+        SyncMenus();
+    }
+
+    private void OnMenuConversationClicked(object sender, RoutedEventArgs e) =>
+        ConversationToggle.IsChecked = MenuConversation.IsChecked;
+
+    private void OnMenuTranslateClicked(object sender, RoutedEventArgs e) =>
+        TranslateToggle.IsChecked = MenuTranslate.IsChecked;
+
+    private void OnBarTextBothClicked(object sender, RoutedEventArgs e) => SetBarText(BarTextMode.Entrambi);
+
+    private void OnBarTextOriginalClicked(object sender, RoutedEventArgs e) => SetBarText(BarTextMode.Originale);
+
+    private void OnBarTextTranslationClicked(object sender, RoutedEventArgs e) => SetBarText(BarTextMode.Traduzione);
+
+    private void SetBarText(BarTextMode mode)
+    {
+        _settings.BarText = mode;
+        _settings.Save();
+        SyncMenus();
+        RefreshBar();
     }
 
     private void OnDirectionChanged(object sender, SelectionChangedEventArgs e)
@@ -534,16 +733,17 @@ public partial class MainWindow : FluentWindow
         SyncMenus();
     }
 
-    private void OnSettingsClicked(object sender, RoutedEventArgs e) => OpenSettings(0);
+    private void OnSettingsClicked(object sender, RoutedEventArgs e) => OpenSettings(SettingsTabs.Aspetto);
 
-    private void OnHistoryMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(4);
+    private void OnHistoryMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(SettingsTabs.Storico);
 
-    private void OnModelsMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(2);
+    private void OnModelsMenuClicked(object sender, RoutedEventArgs e) => OpenSettings(SettingsTabs.Modelli);
 
     private void SetStatus(string message)
     {
         StatusText.Text = message;
         UpdateTray(message);
+        RefreshBar();
     }
 
     private void UpdateTray(string status) =>
@@ -553,6 +753,7 @@ public partial class MainWindow : FluentWindow
             SystemToggle.IsChecked == true,
             MicrophoneToggle.IsChecked == true,
             _overlay is { IsVisible: true },
+            _bar is { IsVisible: true },
             DirectionBox.SelectedIndex == 0 ? "it" : "en",
             status);
 
@@ -565,6 +766,12 @@ public partial class MainWindow : FluentWindow
         MenuEnIt.IsChecked = DirectionBox.SelectedIndex == 1;
         MenuOverlay.IsChecked = _overlay is { IsVisible: true };
         MenuStartStop.Header = _session is { IsRunning: true } ? "Ferma" : "Avvia";
+        MenuBar.IsChecked = _bar is { IsVisible: true };
+        MenuConversation.IsChecked = ConversationToggle.IsChecked == true;
+        MenuTranslate.IsChecked = TranslateToggle.IsChecked == true;
+        MenuBarBoth.IsChecked = _settings.BarText == BarTextMode.Entrambi;
+        MenuBarOriginal.IsChecked = _settings.BarText == BarTextMode.Originale;
+        MenuBarTranslation.IsChecked = _settings.BarText == BarTextMode.Traduzione;
     }
 
     /// <summary>
@@ -591,6 +798,8 @@ public partial class MainWindow : FluentWindow
         FontSize = _settings.FontSize;
         Opacity = _settings.Opacity;
         Topmost = _settings.Topmost;
+        ConversationToggle.IsChecked = _settings.ConversationMode;
+        TranslateToggle.IsChecked = _settings.Translate;
 
         while (_cues.Count > Math.Max(1, _settings.MaxCues))
         {
@@ -603,6 +812,8 @@ public partial class MainWindow : FluentWindow
         }
 
         _overlay?.Refresh();
+        _bar?.ApplyLayout();
+        RefreshBar();
         _settings.Save();
         SyncMenus();
         UpdateTray(StatusText.Text);
@@ -645,7 +856,11 @@ public partial class MainWindow : FluentWindow
         _settings.WindowWidth = Width;
         _settings.WindowHeight = Height;
         _settings.Topmost = Topmost;
+        _settings.BarLeft = _bar?.Left ?? _settings.BarLeft;
+        _settings.BarTop = _bar?.Top ?? _settings.BarTop;
         _settings.Save();
+
+        _bar?.ForceClose();
 
         foreach (var id in new[] { HotkeyShowHide, HotkeySystem, HotkeyMicrophone, HotkeySwap, HotkeyOverlay })
         {

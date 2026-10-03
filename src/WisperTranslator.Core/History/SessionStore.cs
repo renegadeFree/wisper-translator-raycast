@@ -19,7 +19,15 @@ public sealed record HistoryCue(
     TimeSpan Duration,
     string Original,
     string Translation,
-    bool IsFinal);
+    bool IsFinal,
+    int Speaker = Speakers.Unknown)
+{
+    public string SpeakerLabel => Speakers.Label(Speaker);
+
+    public bool HasSpeaker => SpeakerLabel.Length > 0;
+
+    public string SpeakerColor => Speakers.Color(Speaker);
+}
 
 public sealed record SessionNote(
     long SessionId,
@@ -58,6 +66,7 @@ public sealed class SessionStore : IDisposable
             original TEXT NOT NULL,
             translation TEXT NOT NULL DEFAULT '',
             is_final INTEGER NOT NULL DEFAULT 0,
+            speaker INTEGER NOT NULL DEFAULT 0,
             UNIQUE (session_id, utterance_id)
         );
 
@@ -132,6 +141,9 @@ public sealed class SessionStore : IDisposable
 
             command.CommandText = Schema;
             command.ExecuteNonQuery();
+
+            // Gli archivi creati prima della v2 non hanno la colonna del parlante.
+            EnsureColumn(connection, "cues", "speaker", "INTEGER NOT NULL DEFAULT 0");
             return connection;
         }
         catch (Exception)
@@ -144,6 +156,27 @@ public sealed class SessionStore : IDisposable
 
     private static bool IsCorruption(SqliteException exception) =>
         exception.SqliteErrorCode is 11 or 26; // SQLITE_CORRUPT, SQLITE_NOTADB
+
+    /// <summary>Aggiunge una colonna se manca: gli archivi vecchi devono continuare ad aprirsi.</summary>
+    private static void EnsureColumn(SqliteConnection connection, string table, string column, string definition)
+    {
+        using var check = connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info({table});";
+        using (var reader = check.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+        alter.ExecuteNonQuery();
+    }
 
     /// <summary>Sposta il file danneggiato accanto all'originale e ripulisce i file WAL.</summary>
     private static string Quarantine(string databasePath)
@@ -255,15 +288,16 @@ public sealed class SessionStore : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO cues (session_id, utterance_id, timestamp, audio_start, duration_seconds, original, translation, is_final)
-            VALUES ($session, $utterance, $timestamp, $start, $duration, $original, $translation, $final)
+            INSERT INTO cues (session_id, utterance_id, timestamp, audio_start, duration_seconds, original, translation, is_final, speaker)
+            VALUES ($session, $utterance, $timestamp, $start, $duration, $original, $translation, $final, $speaker)
             ON CONFLICT (session_id, utterance_id) DO UPDATE SET
                 timestamp = excluded.timestamp,
                 audio_start = excluded.audio_start,
                 duration_seconds = excluded.duration_seconds,
                 original = excluded.original,
                 translation = excluded.translation,
-                is_final = excluded.is_final;
+                is_final = excluded.is_final,
+                speaker = excluded.speaker;
             """;
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$utterance", cue.Id);
@@ -273,6 +307,7 @@ public sealed class SessionStore : IDisposable
         command.Parameters.AddWithValue("$original", cue.Original);
         command.Parameters.AddWithValue("$translation", cue.Translation);
         command.Parameters.AddWithValue("$final", cue.IsFinal ? 1 : 0);
+        command.Parameters.AddWithValue("$speaker", cue.Speaker);
         command.ExecuteNonQuery();
         }
     }
@@ -316,7 +351,7 @@ public sealed class SessionStore : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText =
             """
-            SELECT id, session_id, timestamp, audio_start, duration_seconds, original, translation, is_final
+            SELECT id, session_id, timestamp, audio_start, duration_seconds, original, translation, is_final, speaker
             FROM cues
             WHERE session_id = $session
             ORDER BY utterance_id;
@@ -335,7 +370,8 @@ public sealed class SessionStore : IDisposable
                 TimeSpan.FromSeconds(reader.GetDouble(4)),
                 reader.GetString(5),
                 reader.GetString(6),
-                reader.GetInt32(7) == 1));
+                reader.GetInt32(7) == 1,
+                reader.GetInt32(8)));
         }
 
         return cues;

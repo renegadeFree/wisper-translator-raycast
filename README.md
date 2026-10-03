@@ -3,9 +3,31 @@
 Trascrizione e traduzione **in tempo reale** e **in locale** dell'audio del PC e del microfono, con
 sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 
-![Widget con le battute](docs/screenshots/widget.png)
+![Barra fluttuante con i parlanti](docs/screenshots/v2-barra-parlanti.png)
 
 ![Overlay a schermo intero](docs/screenshots/overlay.png)
+
+![Scheda Barra delle impostazioni](docs/screenshots/v2-impostazioni-barra.png)
+
+## Novità della versione 2.0
+
+- **Modalità conversazione**: nelle riunioni e nelle call il microfono resta **Tu** e l'audio di
+  sistema viene diviso per parlante (`Speaker 1…8`, ognuno con il suo colore). Se in una frase si
+  sentono due voci, la frase viene spezzata in due battute invece di mescolarle.
+  Dettagli in [docs/CONVERSAZIONE.md](docs/CONVERSAZIONE.md).
+- **Solo trascrizione o traduzione**: l'interruttore **Traduci** (pannello e barra) spegne la
+  traduzione quando serve solo il testo.
+- **Barra fluttuante in stile Apple** (`Wispr Flow`): acrilico di Windows 11, angoli arrotondati,
+  trascinabile ovunque, si aggancia ai bordi, **2 frasi visibili** su **5 in memoria** (regolabili)
+  con la rotellina per scorrere quelle sotto, comparsa con slide+fade, alone "in ascolto",
+  controlli al passaggio del mouse e **modalità discreta** che lascia passare i clic.
+- **Parlanti in tutto il programma**: etichetta nella barra e nel pannello, dettaglio sessione,
+  esportazione **SRT** con `<v Speaker 1>`, JSON con il campo `speaker`, e nuova sezione PDF
+  **Partecipanti rilevati** con battute, tempo di parola e quota di ciascuno.
+- **Nuovi modelli in catalogo**: **Nemotron 3 Diarization** (107 MB, fino a 8 parlanti,
+  OpenMDW-1.1) come predefinito e **Sortformer 4 parlanti v2** (147 MB, CC-BY-4.0) come alternativa.
+- **Nuove schede nelle impostazioni**: **Conversazione** (diarizzatore, download, verifica, limiti
+  dichiarati) e **Barra** (frasi visibili, frasi in memoria, testo mostrato, discreta, animazioni).
 
 ## Novità della versione 1.2
 
@@ -30,8 +52,11 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 - Cattura l'**audio di sistema** (loopback WASAPI) e/o il **microfono**, con accensione indipendente.
 - Trascrive in locale con Whisper (`whisper.cpp`): nessun audio lascia il PC.
 - Traduce in locale con i modelli Firefox/Bergamot: circa **25 ms per frase**, nessuna chiave API.
-- Mostra le battute in un **widget flottante** (nuova in alto, le vecchie scorrono in basso, fino a 20)
-  e in un **overlay a schermo intero**, trasparente e cliccabile-attraverso.
+- Mostra le battute in una **barra fluttuante acrilica** (nuova in alto, le vecchie scendono, le
+  frasi oltre quelle visibili si raggiungono con la rotellina), nel **pannello esteso** e in un
+  **overlay a schermo intero**, trasparente e cliccabile-attraverso.
+- Nella **modalità conversazione** distingue chi parla: *Tu* per il microfono, `Speaker 1…8` per
+  l'audio di sistema, anche in esportazione e nei report.
 - Salva lo storico delle sessioni con **retention di 5 giorni** ed esporta in **SRT**, testo o JSON.
 - Gestisce i modelli: download con verifica SHA-256, ripresa, verifica integrità, import locale,
   eliminazione.
@@ -60,6 +85,8 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 |---|---|
 | **Sistema** | attiva/disattiva l'audio riprodotto dal PC |
 | **Microfono** | attiva/disattiva l'ingresso del microfono |
+| **Conversazione** | separa le voci e dà un nome ai parlanti della call |
+| **Traduci** | spento: trascrive soltanto, senza tradurre |
 | **IT → EN / EN → IT** | direzione della traduzione (deve corrispondere alla lingua parlata) |
 | **Avvia / Ferma** | apre le sorgenti audio e comincia l'ascolto |
 | **Overlay** | mostra i sottotitoli a tutto schermo |
@@ -74,6 +101,11 @@ sottotitoli in una finestra flottante su Windows. Italiano ↔ inglese.
 | `Ctrl+Alt+N` | microfono on/off |
 | `Ctrl+Alt+L` | inverti la direzione |
 | `Ctrl+Alt+O` | overlay on/off |
+
+Nella **barra fluttuante** gli stessi comandi sono sui pulsanti che compaiono passando il mouse:
+avvia/ferma, sistema, microfono, inverti direzione, testo mostrato, conversazione, traduci,
+modalità discreta, overlay, apri il pannello, impostazioni, chiudi nella barra delle applicazioni.
+Il testo si trascina da qualsiasi punto della barra.
 
 ### Dove stanno i dati
 
@@ -100,6 +132,9 @@ l'eventuale motore cloud opzionale usano la rete, e il motore cloud è spento di
 | Nessun testo | sorgente sbagliata | controlla il pulsante **Sistema**/**Microfono** e la direzione |
 | "Hotkey non disponibili" | un altro programma usa la stessa combinazione | cambia programma o ignora: il resto funziona |
 | Il microfono risente delle casse | il microfono capta l'audio degli altoparlanti | usa le cuffie o disattiva una delle due sorgenti |
+| Due righe identiche in conversazione | microfono e audio di sistema hanno sentito la stessa voce | usa le cuffie, oppure spegni **Microfono** |
+| Nessun nome accanto alle battute | diarizzatore non installato o motore definitivo non NeMo | `Impostazioni → Conversazione → Scarica il diarizzatore` |
+| La barra non compare | l'hai chiusa con la X (resta attiva) | `Visuale → Barra fluttuante`, oppure dall'icona nella barra delle applicazioni |
 | Download interrotto | rete instabile | rilanciare: riprende da dove era rimasto |
 | Modello "hash diverso" | file scaricato male | `Impostazioni → Modelli → Elimina`, poi `Scarica` |
 
@@ -107,13 +142,14 @@ l'eventuale motore cloud opzionale usano la rete, e il motore cloud è spento di
 
 ```powershell
 dotnet build                                  # compila
-dotnet test                                   # 40 test
+dotnet test                                   # 78 test
 dotnet run --project src/WisperTranslator.Cli -- hardware
 dotnet run --project src/WisperTranslator.Cli -- capture --seconds 15 --dump
 dotnet run --project src/WisperTranslator.Cli -- live --seconds 20 --model base --lang it
 dotnet run --project src/WisperTranslator.Cli -- translate --bench
 dotnet run --project src/WisperTranslator.Cli -- models list
 dotnet run --project src/WisperTranslator.Cli -- history list
+dotnet run --project src/WisperTranslator.Cli -- diarize clip.wav --lang en
 ```
 
 Per creare l'installer:

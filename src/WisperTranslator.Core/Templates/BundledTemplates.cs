@@ -148,6 +148,7 @@ public static class BundledTemplates
                 new PdfSection("azioni", "Azioni da fare", PdfSectionKind.Ai,
                     "Elenca le azioni con: azione, responsabile, scadenza (anche \"da definire\"). "
                     + "Una riga per azione.", MaxWords: 220),
+                new PdfSection("voci", "Partecipanti rilevati", PdfSectionKind.Speakers),
                 new PdfSection("mappa", "Mappa concettuale", PdfSectionKind.Map, MapTemplateId: "gerarchica-lr"),
                 new PdfSection("trascrizione", "Trascrizione", PdfSectionKind.Transcript),
             ],
@@ -179,6 +180,7 @@ public static class BundledTemplates
             [
                 new PdfSection("sintesi", "Sintesi", PdfSectionKind.Summary, MaxWords: 150),
                 new PdfSection("temi", "Temi emersi", PdfSectionKind.KeyPoints),
+                new PdfSection("voci", "Voci rilevate", PdfSectionKind.Speakers),
                 new PdfSection("citazioni", "Citazioni significative", PdfSectionKind.Ai,
                     "Scegli 5-8 frasi testuali rilevanti e riportale tra virgolette con il minuto in cui "
                     + "sono state dette, se disponibile. Nessuna parafrasi.", MaxWords: 260),
