@@ -65,57 +65,53 @@ public class RealtimeStopTests
     public async Task LaRifinituraNonBloccaIParziali()
     {
         var finalEngine = new BlockingEngine();
-        var partialEngine = new CountingEngine();
+        var source = new BufferedSource();
+        var partialAfterRefinement = new TaskCompletionSource<TranscriptUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var transcriber = new RealtimeTranscriber(
-            new NoiseSource(),
+            source,
             new SpeechSegmenter(new AlwaysSpeechVad()),
-            partialEngine,
+            new InstantEngine(),
             new RealtimeOptions
             {
                 StopTimeout = TimeSpan.FromSeconds(1),
-                PartialInterval = TimeSpan.FromMilliseconds(20),
-                MaxPartialInterval = TimeSpan.FromMilliseconds(20),
+                PartialInterval = TimeSpan.Zero,
+                MaxPartialInterval = TimeSpan.Zero,
                 MinPartialSeconds = 0.05,
             },
             finalEngine);
         using var cancellation = new CancellationTokenSource();
-
+        transcriber.Update += update =>
+        {
+            if (!update.IsFinal && update.UtteranceId == 2)
+            {
+                partialAfterRefinement.TrySetResult(update);
+            }
+        };
+        // Chiude esattamente la prima frase; senza nuovi campioni la sorgente rende il thread.
+        source.Buffer.Write(new float[8 * 16000]);
         var run = Task.Run(() => transcriber.RunAsync(cancellation.Token));
-        await finalEngine.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var callsAtRefinementStart = partialEngine.Calls;
-
-        await Task.Delay(500);
-        Assert.True(
-            partialEngine.Calls > callsAtRefinementStart,
-            "i parziali devono continuare mentre il modello grande rifinisce la frase precedente");
-
-        cancellation.Cancel();
-        finalEngine.Release();
-        await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(6)));
+        try
+        {
+            await finalEngine.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // Solo ora alimenta la seconda frase, mantenendo bloccata la rifinitura della prima.
+            source.Buffer.Write(new float[16 * 512]);
+            var update = await partialAfterRefinement.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(update.Start >= TimeSpan.FromSeconds(8));
+            Assert.Equal("ciao", update.Provisional);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            finalEngine.Release();
+            await run.WaitAsync(TimeSpan.FromSeconds(6));
+            await transcriber.WorkersCompletion.WaitAsync(TimeSpan.FromSeconds(3));
+        }
     }
 
-    private sealed class CountingEngine : IAsrEngine
+    private sealed class BufferedSource : IPcmSource
     {
-        private int _calls;
-
-        public int Calls => Volatile.Read(ref _calls);
-
-        public string Name => "contatore";
-
-        public Task<AsrResult> TranscribeAsync(
-            float[] samples,
-            int sampleRate = 16000,
-            string? language = null,
-            bool useContext = true,
-            CancellationToken cancellationToken = default)
-        {
-            Interlocked.Increment(ref _calls);
-            return Task.FromResult(new AsrResult("ciao", language, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1), []));
-        }
-
-        public void Dispose()
-        {
-        }
+        public FloatRingBuffer Buffer { get; } = new(10 * 16000);
+        public int Read(Span<float> destination) => Buffer.Read(destination);
     }
 
     private static RealtimeTranscriber Build(IAsrEngine engine, TimeSpan stopTimeout) =>
